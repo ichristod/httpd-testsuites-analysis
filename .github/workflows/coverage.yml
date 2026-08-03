@@ -1,0 +1,266 @@
+name: Coverage Collection
+
+on:
+  workflow_dispatch:
+    inputs:
+      httpd_ref:
+        description: 'httpd branch or tag (2.4.x, trunk, …)'
+        default: 'trunk'
+        required: false
+        type: string
+
+env:
+  PREFIX:          ${{ github.workspace }}/build/httpd
+  HTTPD_ROOT:      ${{ github.workspace }}/httpd
+  PERL_FRAMEWORK:  ${{ github.workspace }}/httpd-tests
+  ANALYSIS_ROOT:   ${{ github.workspace }}
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+
+    services:
+      redis:
+        image: redis:7
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      memcached:
+        image: memcached:1
+        ports: ['11211:11211']
+
+    steps:
+      # ── Checkouts ──────────────────────────────────────────────────────────
+      - name: Checkout analysis repo
+        uses: actions/checkout@v4
+
+      - name: Checkout httpd
+        uses: actions/checkout@v4
+        with:
+          repository: apache/httpd
+          ref: ${{ inputs.httpd_ref || 'trunk' }}
+          path: httpd
+
+      - name: Checkout httpd-tests
+        uses: actions/checkout@v4
+        with:
+          repository: apache/httpd-tests
+          path: httpd-tests
+
+      # ── System dependencies ────────────────────────────────────────────────
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y \
+            autoconf automake libtool libtool-bin \
+            libapr1-dev libaprutil1-dev \
+            libssl-dev liblua5.4-dev libbrotli-dev \
+            libcurl4-openssl-dev libnghttp2-dev \
+            libjansson-dev libpcre2-dev libxml2-dev \
+            libsasl2-dev libexpat1-dev check \
+            perl-doc cpanminus \
+            python3-pip python3-venv \
+            nghttp2 curl php-fpm
+
+      # ── pebble (ACME server required by mod_md tests) ──────────────────────
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: false
+
+      - name: Install pebble
+        run: |
+          go install github.com/letsencrypt/pebble/v2/cmd/pebble@latest 2>/dev/null || \
+          go install github.com/letsencrypt/pebble/cmd/pebble@latest 2>/dev/null || \
+          echo "WARNING: pebble install failed — mod_md tests will be skipped"
+          echo "$HOME/go/bin" >> $GITHUB_PATH
+
+      # ── Perl environment ───────────────────────────────────────────────────
+      - name: Export Perl local::lib paths
+        run: |
+          echo "PERL5LIB=$HOME/perl5/lib/perl5"         >> $GITHUB_ENV
+          echo "PERL_LOCAL_LIB_ROOT=$HOME/perl5"        >> $GITHUB_ENV
+          echo "PERL_MB_OPT=--install_base $HOME/perl5" >> $GITHUB_ENV
+          echo "PERL_MM_OPT=INSTALL_BASE=$HOME/perl5"   >> $GITHUB_ENV
+          echo "$HOME/perl5/bin"                        >> $GITHUB_PATH
+
+      - name: Cache Perl modules
+        uses: actions/cache@v4
+        id: perl-cache
+        with:
+          path: ~/perl5
+          key: perl5-ubuntu-v1
+
+      - name: Install Perl CPAN modules
+        if: steps.perl-cache.outputs.cache-hit != 'true'
+        run: |
+          cpanm --local-lib=~/perl5 local::lib
+          cpanm --notest \
+            LWP::Protocol::https \
+            LWP::Protocol::AnyEvent::http \
+            ExtUtils::Embed \
+            Test::More \
+            AnyEvent \
+            DateTime \
+            HTTP::DAV \
+            FCGI \
+            AnyEvent::WebSocket::Client \
+            Apache::Test
+
+      # ── Python environment ─────────────────────────────────────────────────
+      - name: Cache Python venv
+        uses: actions/cache@v4
+        id: venv-cache
+        with:
+          path: .venv
+          key: venv-ubuntu-v1
+
+      - name: Set up Python venv
+        if: steps.venv-cache.outputs.cache-hit != 'true'
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install \
+            pytest==8.4.2 cryptography pyopenssl requests \
+            python-multipart filelock websockets \
+            gcovr streamlit pandas
+
+      - name: Add Python venv to PATH
+        run: echo "$GITHUB_WORKSPACE/.venv/bin" >> $GITHUB_PATH
+
+      # ── Output directories ─────────────────────────────────────────────────
+      - name: Create output directories
+        run: mkdir -p coverage/{raw,processed,metrics}
+
+      # ── Build ──────────────────────────────────────────────────────────────
+      - name: Build httpd with coverage instrumentation
+        run: |
+          cd $HTTPD_ROOT
+          ./buildconf --with-apr=/usr/bin/apr-1-config
+          ./configure \
+            --prefix=$PREFIX \
+            --enable-mods-shared=reallyall \
+            --with-mpm=event \
+            --enable-mpms-shared=all \
+            --enable-load-all-modules \
+            --with-apr=/usr \
+            --with-apr-util=/usr \
+            CFLAGS="-g -O0 --coverage" \
+            LDFLAGS="--coverage"
+          make -j$(nproc)
+          make install
+
+      # ── Perl test suite ────────────────────────────────────────────────────
+      # Perl coverage comes only from the per-test loop below, unioned back
+      # together — no separate full-suite run.
+      - name: Prepare Perl test framework
+        run: |
+          cd $PERL_FRAMEWORK
+          perl Makefile.PL -apxs $PREFIX/bin/apxs
+
+      - name: Run each Perl test individually
+        timeout-minutes: 280
+        run: coverage/tools/create_per_test.sh
+
+      - name: Merge per-test coverage into perl.norm.json
+        run: |
+          python coverage/tools/analyze_per_test.py \
+            coverage/per_test/perl/norm \
+            --merged-json coverage/processed/perl.norm.json
+
+      - name: Use a per-test raw scan as the raw/perl.json baseline
+        # .gcno (instrumentable lines) never gets touched by clean_gcda.sh,
+        # so any per-test scan already has the full file/line inventory.
+        run: |
+          first_raw=$(ls coverage/per_test/perl/raw/*.json | sort | head -1)
+          cp "$first_raw" coverage/raw/perl.json
+
+      # ── Reset gcda between suites ──────────────────────────────────────────
+      - name: Clean gcda files
+        run: |
+          cd $HTTPD_ROOT
+          $ANALYSIS_ROOT/coverage/tools/clean_gcda.sh
+
+      # ── Python test suite ──────────────────────────────────────────────────
+      - name: Run Python test suite — event MPM
+        timeout-minutes: 40
+        run: |
+          cd $HTTPD_ROOT
+          MPM=event pytest test/modules/ || true
+
+      - name: Run Python test suite — worker MPM
+        timeout-minutes: 40
+        run: |
+          cd $HTTPD_ROOT
+          MPM=worker pytest test/modules/ || true
+
+      - name: Collect Python coverage
+        run: |
+          cd $ANALYSIS_ROOT
+          gcovr -r $HTTPD_ROOT \
+            --gcov-ignore-errors all \
+            --gcov-ignore-parse-errors all \
+            --merge-mode-functions=merge-use-line-min \
+            --exclude 'conftest' --exclude 'modules/apreq/' \
+            --json coverage/raw/python.json
+          python coverage/tools/normalize_gcovr.py \
+            coverage/raw/python.json \
+            coverage/processed/python.norm.json
+
+      # ── Analysis ───────────────────────────────────────────────────────────
+      - name: Run coverage diff
+        run: |
+          python coverage/tools/coverage_diff.py \
+            coverage/processed/perl.norm.json \
+            coverage/processed/python.norm.json \
+            coverage/metrics/perl_only.json
+          python coverage/tools/coverage_diff.py \
+            coverage/processed/python.norm.json \
+            coverage/processed/perl.norm.json \
+            coverage/metrics/python_only.json
+
+      - name: Coverage summary
+        run: |
+          python - <<'EOF'
+          import json, pathlib
+
+          def count(p):
+              return sum(len(v) for v in json.loads(pathlib.Path(p).read_text()).values())
+
+          perl    = count("coverage/processed/perl.norm.json")
+          py      = count("coverage/processed/python.norm.json")
+          p_only  = count("coverage/metrics/perl_only.json")
+          py_only = count("coverage/metrics/python_only.json")
+          both    = perl - p_only
+
+          print(f"{'Perl lines covered:':<25} {perl:>8,}")
+          print(f"{'Python lines covered:':<25} {py:>8,}")
+          print(f"{'Perl-only lines:':<25} {p_only:>8,}")
+          print(f"{'Python-only lines:':<25} {py_only:>8,}")
+          print(f"{'Covered by both:':<25} {both:>8,}")
+          EOF
+
+      # ── Migration ranking ───────────────────────────────────────────────────
+      # Uses the per-test coverage collected above — no second Perl run.
+      - name: Rank Perl tests by migration priority
+        run: |
+          python coverage/tools/analyze_consolidation.py \
+            coverage/per_test/perl/norm \
+            coverage/processed/python.norm.json \
+            --json coverage/per_test/perl/consolidation_ranking.json
+
+      # ── Upload ─────────────────────────────────────────────────────────────
+      - name: Upload coverage artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ github.run_id }}
+          path: |
+            coverage/raw/
+            coverage/processed/
+            coverage/metrics/
+            coverage/per_test/
+          retention-days: 90

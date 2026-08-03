@@ -36,6 +36,15 @@ def flatten(cov):
             out.add((fname, ln))
     return out
 
+
+# union every test's coverage back into {file: [lines]}, same shape normalize_gcovr.py produces
+def merge_coverage(all_tests):
+    merged = defaultdict(set)
+    for cov in all_tests.values():
+        for fname, lines in cov.items():
+            merged[fname].update(lines)
+    return {fname: sorted(lines) for fname, lines in merged.items()}
+
 # picks the next test that covers the most remaining lines
 # receives something like {"test_a": {"core.c": {10, 20, 30}}, "test_b": {...}, ...}
 def most_valuable_tests(all_tests):
@@ -88,10 +97,19 @@ def main():
     p.add_argument("norm_dir")
     p.add_argument("--top", type=int, default=30)
     p.add_argument("--json", metavar="PATH")
+    p.add_argument("--merged-json", metavar="PATH",
+                    help="write the union of all tests' coverage to PATH")
     args = p.parse_args()
 
     all_tests = load_all(args.norm_dir)
     print(f"{len(all_tests)} tests loaded")
+
+    if args.merged_json:
+        merged = merge_coverage(all_tests)
+        with open(args.merged_json, "w") as f:
+            json.dump(merged, f, indent=2)
+        n_lines = sum(len(v) for v in merged.values())
+        print(f"merged: {len(merged)} files, {n_lines} lines -> {args.merged_json}")
 
     # greedy set-cover
     order, total = most_valuable_tests(all_tests)
