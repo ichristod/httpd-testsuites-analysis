@@ -1,0 +1,8 @@
+# Generated coverage data - outputs of the pipeline, not source.
+# Get these from a coverage.yml Actions run artifact instead of git history;
+# see README's "Looking at results without running the pipeline".
+coverage/raw/
+coverage/processed/
+coverage/metrics/
+coverage/per_test/
+coverage/lcov/
