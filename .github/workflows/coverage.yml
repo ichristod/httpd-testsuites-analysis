@@ -11,7 +11,8 @@ on:
 
 env:
   PREFIX:          ${{ github.workspace }}/build/httpd
-  HTTPD_ROOT:      ${{ github.workspace }}/httpd
+  # short path - test/gen/apache/logs/cgisock.NN hit the 108-byte unix socket limit otherwise
+  HTTPD_ROOT:      /tmp/httpd
   PERL_FRAMEWORK:  ${{ github.workspace }}/httpd-tests
   ANALYSIS_ROOT:   ${{ github.workspace }}
 
@@ -44,6 +45,10 @@ jobs:
           repository: apache/httpd
           ref: ${{ inputs.httpd_ref || 'trunk' }}
           path: httpd
+
+      # actions/checkout won't target outside github.workspace, so move it after
+      - name: Relocate httpd checkout to a short path
+        run: mv "${{ github.workspace }}/httpd" "$HTTPD_ROOT"
 
       - name: Checkout httpd-tests
         uses: actions/checkout@v4
