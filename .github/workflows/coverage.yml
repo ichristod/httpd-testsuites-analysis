@@ -127,6 +127,12 @@ jobs:
       - name: Create output directories
         run: mkdir -p coverage/{raw,processed,metrics}
 
+      - name: Print gcc/gcov/gcovr versions
+        run: |
+          gcc --version
+          gcov --version
+          gcovr --version
+
       # ── Build ──────────────────────────────────────────────────────────────
       - name: Build httpd with coverage instrumentation
         run: |
@@ -204,6 +210,7 @@ jobs:
             --gcov-ignore-parse-errors all \
             --merge-mode-functions=merge-use-line-min \
             --exclude 'conftest' --exclude 'modules/apreq/' \
+            --gcov-exclude 'conftest(\.c|\.gcno|\.gcda)?$' \
             --json coverage/raw/python.json
           python coverage/tools/normalize_gcovr.py \
             coverage/raw/python.json \
