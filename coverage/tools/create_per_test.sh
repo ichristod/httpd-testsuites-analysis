@@ -64,6 +64,8 @@ find "$PERL_FRAMEWORK/t" -name '*.t' -type f | sort | while read -r tfile; do
   # stop httpd to get gcda flushed
   (cd "$PERL_FRAMEWORK" && ./t/TEST -stop 2>/dev/null || true)
 
+  echo "gcda files on disk: $(find "$HTTPD_ROOT" -name '*.gcda' | wc -l)"
+
   # capture coverage
   if gcovr -r "$HTTPD_ROOT" \
        --config /dev/null \

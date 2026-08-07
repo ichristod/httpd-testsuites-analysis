@@ -66,20 +66,6 @@ jobs:
             python3-pip python3-venv \
             nghttp2 curl php-fpm
 
-      # ── pebble (ACME server required by mod_md tests) ──────────────────────
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.22'
-          cache: false
-
-      - name: Install pebble
-        run: |
-          go install github.com/letsencrypt/pebble/v2/cmd/pebble@latest 2>/dev/null || \
-          go install github.com/letsencrypt/pebble/cmd/pebble@latest 2>/dev/null || \
-          echo "WARNING: pebble install failed — mod_md tests will be skipped"
-          echo "$HOME/go/bin" >> $GITHUB_PATH
-
       # ── Perl environment ───────────────────────────────────────────────────
       - name: Export Perl local::lib paths
         run: |
@@ -186,17 +172,24 @@ jobs:
           $ANALYSIS_ROOT/coverage/tools/clean_gcda.sh
 
       # ── Python test suite ──────────────────────────────────────────────────
+      # No test/modules/md — upstream httpd's own CI (.github/workflows/linux.yml)
+      # has the ACME/mod_md job disabled ("pebble install is broken"), and its
+      # one working pytest job excludes TEST_MD too. md coverage is collected
+      # locally instead and merged in — see README's "Collect mod_md coverage
+      # locally" section.
       - name: Run Python test suite — event MPM
         timeout-minutes: 40
         run: |
           cd $HTTPD_ROOT
-          MPM=event pytest test/modules/ || true
+          MPM=event pytest test/modules/core test/modules/http1 \
+            test/modules/http2 test/modules/proxy || true
 
       - name: Run Python test suite — worker MPM
         timeout-minutes: 40
         run: |
           cd $HTTPD_ROOT
-          MPM=worker pytest test/modules/ || true
+          MPM=worker pytest test/modules/core test/modules/http1 \
+            test/modules/http2 test/modules/proxy || true
 
       - name: Collect Python coverage
         run: |
