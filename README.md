@@ -98,6 +98,15 @@ Then build and install:
     make -j$(nproc)
     make install
 
+`./configure` compiles its own test programs with `--coverage` too
+(it's in `CFLAGS` for the whole build), then deletes the source right
+after each one. That leaves an orphaned `a-conftest.gcno` with nothing to
+match — `gcov` errors on it, and `gcovr` cancels every other file's
+results along with it, not just the one bad file. Remove it once, before
+any `gcovr` call:
+
+    rm -f $HTTPD_ROOT/a-conftest.gc*
+
 ## Collect Perl suite coverage (per-test)
 
 There's no single "run everything, then gcovr once" pass for Perl.
@@ -221,7 +230,6 @@ Collect coverage after both runs (do not clean between them):
         --gcov-ignore-parse-errors all \
         --merge-mode-functions=merge-use-line-min \
         --exclude 'conftest' --exclude 'modules/apreq/' \
-        --gcov-exclude 'conftest(\.c|\.gcno|\.gcda)?$' \
         --json coverage/raw/python.json
 
     python coverage/tools/normalize_gcovr.py \
@@ -268,7 +276,6 @@ into its own file — don't overwrite `python.norm.json` directly yet:
         --gcov-ignore-parse-errors all \
         --merge-mode-functions=merge-use-line-min \
         --exclude 'conftest' --exclude 'modules/apreq/' \
-        --gcov-exclude 'conftest(\.c|\.gcno|\.gcda)?$' \
         --json coverage/raw/python_md.json
 
     python coverage/tools/normalize_gcovr.py \

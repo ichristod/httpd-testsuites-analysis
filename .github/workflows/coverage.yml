@@ -151,6 +151,14 @@ jobs:
           make -j$(nproc)
           make install
 
+      # ./configure compiles its own throwaway test programs with --coverage
+      # too, then deletes the source right after each one. gcov chokes on
+      # the leftover a-conftest.gcno (no source to match) and gcovr cancels
+      # every other file's results along with it - so this has to go before
+      # any gcovr call, not just be excluded from the report.
+      - name: Remove configure's own coverage artifacts
+        run: rm -f $HTTPD_ROOT/a-conftest.gc*
+
       # ── Perl test suite ────────────────────────────────────────────────────
       # Perl coverage comes only from the per-test loop below, unioned back
       # together — no separate full-suite run.
@@ -210,7 +218,6 @@ jobs:
             --gcov-ignore-parse-errors all \
             --merge-mode-functions=merge-use-line-min \
             --exclude 'conftest' --exclude 'modules/apreq/' \
-            --gcov-exclude 'conftest(\.c|\.gcno|\.gcda)?$' \
             --json coverage/raw/python.json
           python coverage/tools/normalize_gcovr.py \
             coverage/raw/python.json \

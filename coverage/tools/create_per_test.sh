@@ -65,10 +65,6 @@ find "$PERL_FRAMEWORK/t" -name '*.t' -type f | sort | while read -r tfile; do
   (cd "$PERL_FRAMEWORK" && ./t/TEST -stop 2>/dev/null || true)
 
   # capture coverage
-  # --gcov-exclude keeps gcov from ever touching a-conftest.gcno (a leftover
-  # from ./configure's own --coverage-instrumented test compiles, whose
-  # source is long gone) - without it, gcov errors on that one file and
-  # gcovr cancels every other in-flight worker along with it.
   if gcovr -r "$HTTPD_ROOT" \
        --config /dev/null \
        --gcov-ignore-errors all \
@@ -76,7 +72,6 @@ find "$PERL_FRAMEWORK/t" -name '*.t' -type f | sort | while read -r tfile; do
        --merge-mode-functions=merge-use-line-min \
        --exclude 'conftest(\.c|\.gcno|\.gcda)?$' \
        --exclude 'modules/apreq/' \
-       --gcov-exclude 'conftest(\.c|\.gcno|\.gcda)?$' \
        --json "$outdir/raw/${name}.json"; then
 
     # normalize coverage
