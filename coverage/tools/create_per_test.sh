@@ -64,6 +64,21 @@ find "$PERL_FRAMEWORK/t" -name '*.t' -type f | sort | while read -r tfile; do
   # stop httpd to get gcda flushed
   (cd "$PERL_FRAMEWORK" && ./t/TEST -stop 2>/dev/null || true)
 
+  if [ "$total" -eq 1 ]; then
+    echo "--- diagnostic: real .gcno count vs gcovr -j 1 (first test only) ---"
+    echo "gcno files on disk: $(find "$HTTPD_ROOT" -name '*.gcno' | wc -l)"
+    gcovr -r "$HTTPD_ROOT" -j 1 \
+      --config /dev/null \
+      --gcov-ignore-errors all \
+      --gcov-ignore-parse-errors all \
+      --merge-mode-functions=merge-use-line-min \
+      --exclude 'conftest(\.c|\.gcno|\.gcda)?$' \
+      --exclude 'modules/apreq/' \
+      --json /tmp/diag_j1.json || true
+    python3 -c "import json; d=json.load(open('/tmp/diag_j1.json')); print('gcovr -j 1 found', len(d['files']), 'files')" || true
+    echo "--- end diagnostic ---"
+  fi
+
   # capture coverage
   if gcovr -r "$HTTPD_ROOT" \
        --config /dev/null \
