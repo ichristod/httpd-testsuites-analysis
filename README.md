@@ -51,7 +51,17 @@ Python venv (inside this repo):
     python3 -m venv .venv
     source .venv/bin/activate
     pip install pytest==8.4.2 cryptography pyopenssl requests python-multipart filelock \
-        websockets gcovr streamlit pandas
+        websockets gcovr==7.2 streamlit pandas
+
+`gcovr` is pinned deliberately, not just for reproducibility in general —
+newer versions (8.x, as of this writing) appear to silently drop most
+real coverage files for this build, apparently because gcovr's
+file-inclusion logic stopped resolving libtool's `.libs/` object
+directories back to the real source path (see
+`presentation/process-verification-notes.md` for how this was found).
+`gcovr==7.2` is being tested as a fix for that. If you bump this
+version, verify coverage output is still substantial (hundreds of files,
+not a handful) before trusting it.
 
 ## Setup
 
@@ -229,7 +239,6 @@ Collect coverage after both runs (do not clean between them):
         --gcov-ignore-errors all \
         --gcov-ignore-parse-errors all \
         --merge-mode-functions=merge-use-line-min \
-        --filter '.*' \
         --exclude 'conftest' --exclude 'modules/apreq/' \
         --json coverage/raw/python.json
 
@@ -276,7 +285,6 @@ into its own file — don't overwrite `python.norm.json` directly yet:
         --gcov-ignore-errors all \
         --gcov-ignore-parse-errors all \
         --merge-mode-functions=merge-use-line-min \
-        --filter '.*' \
         --exclude 'conftest' --exclude 'modules/apreq/' \
         --json coverage/raw/python_md.json
 

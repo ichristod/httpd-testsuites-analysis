@@ -65,18 +65,11 @@ find "$PERL_FRAMEWORK/t" -name '*.t' -type f | sort | while read -r tfile; do
   (cd "$PERL_FRAMEWORK" && ./t/TEST -stop 2>/dev/null || true)
 
   # capture coverage
-  # --filter '.*' matters here: gcno metadata for libtool-built modules
-  # embeds a synthetic ".libs/" path component (e.g. modules/aaa/.libs/
-  # mod_authn_core.c) that doesn't match the real source layout. gcovr's
-  # default filter (derived from -r) rejects that mismatch and silently
-  # drops the file - no error, just missing from the report. An explicit
-  # catch-all filter skips that path validation entirely.
   if gcovr -r "$HTTPD_ROOT" \
        --config /dev/null \
        --gcov-ignore-errors all \
        --gcov-ignore-parse-errors all \
        --merge-mode-functions=merge-use-line-min \
-       --filter '.*' \
        --exclude 'conftest(\.c|\.gcno|\.gcda)?$' \
        --exclude 'modules/apreq/' \
        --json "$outdir/raw/${name}.json"; then

@@ -109,7 +109,7 @@ jobs:
         id: venv-cache
         with:
           path: .venv
-          key: venv-ubuntu-v1
+          key: venv-ubuntu-v2
 
       - name: Set up Python venv
         if: steps.venv-cache.outputs.cache-hit != 'true'
@@ -118,7 +118,7 @@ jobs:
           .venv/bin/pip install \
             pytest==8.4.2 cryptography pyopenssl requests \
             python-multipart filelock websockets \
-            gcovr streamlit pandas
+            gcovr==7.2 streamlit pandas
 
       - name: Add Python venv to PATH
         run: echo "$GITHUB_WORKSPACE/.venv/bin" >> $GITHUB_PATH
@@ -217,7 +217,6 @@ jobs:
             --gcov-ignore-errors all \
             --gcov-ignore-parse-errors all \
             --merge-mode-functions=merge-use-line-min \
-            --filter '.*' \
             --exclude 'conftest' --exclude 'modules/apreq/' \
             --json coverage/raw/python.json
           python coverage/tools/normalize_gcovr.py \
