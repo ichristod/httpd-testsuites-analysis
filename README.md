@@ -229,6 +229,7 @@ Collect coverage after both runs (do not clean between them):
         --gcov-ignore-errors all \
         --gcov-ignore-parse-errors all \
         --merge-mode-functions=merge-use-line-min \
+        --filter '.*' \
         --exclude 'conftest' --exclude 'modules/apreq/' \
         --json coverage/raw/python.json
 
@@ -275,6 +276,7 @@ into its own file — don't overwrite `python.norm.json` directly yet:
         --gcov-ignore-errors all \
         --gcov-ignore-parse-errors all \
         --merge-mode-functions=merge-use-line-min \
+        --filter '.*' \
         --exclude 'conftest' --exclude 'modules/apreq/' \
         --json coverage/raw/python_md.json
 

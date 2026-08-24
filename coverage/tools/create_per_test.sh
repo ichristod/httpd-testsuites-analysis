@@ -64,50 +64,19 @@ find "$PERL_FRAMEWORK/t" -name '*.t' -type f | sort | while read -r tfile; do
   # stop httpd to get gcda flushed
   (cd "$PERL_FRAMEWORK" && ./t/TEST -stop 2>/dev/null || true)
 
-  if [ "$total" -eq 1 ]; then
-    echo "--- diagnostic: real .gcno count vs gcovr -j 1 (first test only) ---"
-    echo "gcno files on disk: $(find "$HTTPD_ROOT" -name '*.gcno' | wc -l)"
-    gcovr -r "$HTTPD_ROOT" -j 1 \
-      --config /dev/null \
-      --gcov-ignore-errors all \
-      --gcov-ignore-parse-errors all \
-      --merge-mode-functions=merge-use-line-min \
-      --exclude 'conftest(\.c|\.gcno|\.gcda)?$' \
-      --exclude 'modules/apreq/' \
-      --json /tmp/diag_j1.json || true
-    python3 -c "import json; d=json.load(open('/tmp/diag_j1.json')); print('gcovr -j 1 found', len(d['files']), 'files')" || true
-
-    echo "gcno for server/core.c: $(find "$HTTPD_ROOT" -name 'core.gcno' -path '*/server/*')"
-    echo "--- verbose gcovr, looking for core.c ---"
-    gcovr -r "$HTTPD_ROOT" -j 1 --verbose \
-      --config /dev/null \
-      --gcov-ignore-errors all \
-      --gcov-ignore-parse-errors all \
-      --merge-mode-functions=merge-use-line-min \
-      --exclude 'conftest(\.c|\.gcno|\.gcda)?$' \
-      --exclude 'modules/apreq/' \
-      --json /tmp/diag_verbose.json > /tmp/diag_verbose.log 2>&1 || true
-    grep -i "core\.c\|core\.gcno" /tmp/diag_verbose.log | head -20
-
-    echo "--- same, with an explicit catch-all filter ---"
-    gcovr -r "$HTTPD_ROOT" -j 1 --filter '.*' \
-      --config /dev/null \
-      --gcov-ignore-errors all \
-      --gcov-ignore-parse-errors all \
-      --merge-mode-functions=merge-use-line-min \
-      --exclude 'conftest(\.c|\.gcno|\.gcda)?$' \
-      --exclude 'modules/apreq/' \
-      --json /tmp/diag_filter.json || true
-    python3 -c "import json; d=json.load(open('/tmp/diag_filter.json')); print('gcovr --filter .* found', len(d['files']), 'files')" || true
-    echo "--- end diagnostic ---"
-  fi
-
   # capture coverage
+  # --filter '.*' matters here: gcno metadata for libtool-built modules
+  # embeds a synthetic ".libs/" path component (e.g. modules/aaa/.libs/
+  # mod_authn_core.c) that doesn't match the real source layout. gcovr's
+  # default filter (derived from -r) rejects that mismatch and silently
+  # drops the file - no error, just missing from the report. An explicit
+  # catch-all filter skips that path validation entirely.
   if gcovr -r "$HTTPD_ROOT" \
        --config /dev/null \
        --gcov-ignore-errors all \
        --gcov-ignore-parse-errors all \
        --merge-mode-functions=merge-use-line-min \
+       --filter '.*' \
        --exclude 'conftest(\.c|\.gcno|\.gcda)?$' \
        --exclude 'modules/apreq/' \
        --json "$outdir/raw/${name}.json"; then

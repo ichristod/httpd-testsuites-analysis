@@ -217,6 +217,7 @@ jobs:
             --gcov-ignore-errors all \
             --gcov-ignore-parse-errors all \
             --merge-mode-functions=merge-use-line-min \
+            --filter '.*' \
             --exclude 'conftest' --exclude 'modules/apreq/' \
             --json coverage/raw/python.json
           python coverage/tools/normalize_gcovr.py \
