@@ -76,6 +76,29 @@ find "$PERL_FRAMEWORK/t" -name '*.t' -type f | sort | while read -r tfile; do
       --exclude 'modules/apreq/' \
       --json /tmp/diag_j1.json || true
     python3 -c "import json; d=json.load(open('/tmp/diag_j1.json')); print('gcovr -j 1 found', len(d['files']), 'files')" || true
+
+    echo "gcno for server/core.c: $(find "$HTTPD_ROOT" -name 'core.gcno' -path '*/server/*')"
+    echo "--- verbose gcovr, looking for core.c ---"
+    gcovr -r "$HTTPD_ROOT" -j 1 --verbose \
+      --config /dev/null \
+      --gcov-ignore-errors all \
+      --gcov-ignore-parse-errors all \
+      --merge-mode-functions=merge-use-line-min \
+      --exclude 'conftest(\.c|\.gcno|\.gcda)?$' \
+      --exclude 'modules/apreq/' \
+      --json /tmp/diag_verbose.json > /tmp/diag_verbose.log 2>&1 || true
+    grep -i "core\.c\|core\.gcno" /tmp/diag_verbose.log | head -20
+
+    echo "--- same, with an explicit catch-all filter ---"
+    gcovr -r "$HTTPD_ROOT" -j 1 --filter '.*' \
+      --config /dev/null \
+      --gcov-ignore-errors all \
+      --gcov-ignore-parse-errors all \
+      --merge-mode-functions=merge-use-line-min \
+      --exclude 'conftest(\.c|\.gcno|\.gcda)?$' \
+      --exclude 'modules/apreq/' \
+      --json /tmp/diag_filter.json || true
+    python3 -c "import json; d=json.load(open('/tmp/diag_filter.json')); print('gcovr --filter .* found', len(d['files']), 'files')" || true
     echo "--- end diagnostic ---"
   fi
 
