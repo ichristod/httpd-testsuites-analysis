@@ -67,7 +67,8 @@ find "$PERL_FRAMEWORK/t" -name '*.t' -type f | sort | while read -r tfile; do
   # capture coverage
   if gcovr -r "$HTTPD_ROOT" \
        --config /dev/null \
-       --gcov-ignore-errors all \
+       --gcov-ignore-errors output_error \
+       --gcov-ignore-errors no_working_dir_found \
        --gcov-ignore-parse-errors all \
        --merge-mode-functions=merge-use-line-min \
        --exclude 'conftest(\.c|\.gcno|\.gcda)?$' \

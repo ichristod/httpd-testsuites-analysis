@@ -159,6 +159,31 @@ jobs:
       - name: Remove configure's own coverage artifacts
         run: rm -f $HTTPD_ROOT/a-conftest.gc*
 
+      # Quick check on file resolution before burning hours on the Perl suite.
+      - name: Diagnose gcovr source-file resolution (pre-test, .gcno only)
+        run: |
+          cd $ANALYSIS_ROOT
+          gcovr -r $HTTPD_ROOT \
+            --gcov-ignore-errors output_error \
+            --gcov-ignore-errors no_working_dir_found \
+            --gcov-ignore-parse-errors all \
+            --merge-mode-functions=merge-use-line-min \
+            --exclude 'conftest(\.c|\.gcno|\.gcda)?$' \
+            --exclude 'modules/apreq/' \
+            --verbose \
+            --json /tmp/gcovr_diag.json > /tmp/gcovr_diag.log 2>&1 || true
+          echo "=== file count in diagnostic scan ==="
+          python3 -c "
+          import json
+          try:
+              d = json.load(open('/tmp/gcovr_diag.json'))
+              print(len(d['files']), 'files')
+          except FileNotFoundError:
+              print('no JSON produced - gcovr likely errored, see log below')
+          "
+          echo "=== resolution trace for modules/aaa/mod_authn_core.c ==="
+          grep -B2 -A10 "mod_authn_core" /tmp/gcovr_diag.log | head -100 || echo "(no mention found in verbose log)"
+
       # ── Perl test suite ────────────────────────────────────────────────────
       # Perl coverage comes only from the per-test loop below, unioned back
       # together — no separate full-suite run.
@@ -214,7 +239,8 @@ jobs:
         run: |
           cd $ANALYSIS_ROOT
           gcovr -r $HTTPD_ROOT \
-            --gcov-ignore-errors all \
+            --gcov-ignore-errors output_error \
+            --gcov-ignore-errors no_working_dir_found \
             --gcov-ignore-parse-errors all \
             --merge-mode-functions=merge-use-line-min \
             --exclude 'conftest' --exclude 'modules/apreq/' \
