@@ -53,15 +53,11 @@ Python venv (inside this repo):
     pip install pytest==8.4.2 cryptography pyopenssl requests python-multipart filelock \
         websockets gcovr==7.2 streamlit pandas
 
-`gcovr` is pinned deliberately, not just for reproducibility in general —
-newer versions (8.x, as of this writing) appear to silently drop most
-real coverage files for this build, apparently because gcovr's
-file-inclusion logic stopped resolving libtool's `.libs/` object
-directories back to the real source path (see
-`presentation/process-verification-notes.md` for how this was found).
-`gcovr==7.2` is being tested as a fix for that. If you bump this
-version, verify coverage output is still substantial (hundreds of files,
-not a handful) before trusting it.
+`gcovr` is pinned for reproducibility. If you bump the version, verify
+coverage output is still substantial (hundreds of files, not a
+handful) — see `presentation/process-verification-notes.md` for the
+near-zero-coverage bug this project hit and how it was tracked down to
+`--gcov-ignore-errors` (below), not the gcovr version.
 
 ## Setup
 
@@ -236,7 +232,8 @@ bug in 2.4.x, and h2load load tests.
 Collect coverage after both runs (do not clean between them):
 
     gcovr -r $HTTPD_ROOT \
-        --gcov-ignore-errors all \
+        --gcov-ignore-errors output_error \
+        --gcov-ignore-errors no_working_dir_found \
         --gcov-ignore-parse-errors all \
         --merge-mode-functions=merge-use-line-min \
         --exclude 'conftest' --exclude 'modules/apreq/' \
@@ -282,7 +279,8 @@ way `t/ssl/*` does on the Perl side. Collect and normalize its coverage
 into its own file — don't overwrite `python.norm.json` directly yet:
 
     gcovr -r $HTTPD_ROOT \
-        --gcov-ignore-errors all \
+        --gcov-ignore-errors output_error \
+        --gcov-ignore-errors no_working_dir_found \
         --gcov-ignore-parse-errors all \
         --merge-mode-functions=merge-use-line-min \
         --exclude 'conftest' --exclude 'modules/apreq/' \
