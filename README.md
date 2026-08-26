@@ -17,6 +17,7 @@ around the results.
 - Python 3.11+ with pip/venv
 - Perl with cpanm
 - APR and APR-util dev headers
+- Go (to build pebble, for mod_md's ACME tests)
 
 System packages (Fedora):
 
@@ -188,9 +189,8 @@ Clean gcov data before running the other suite:
 
 ## Collect Python suite coverage
 
-Run the suite twice, once per MPM. This matches what CI does, and what
-upstream httpd's own CI does for its pytest-based job — no `test/modules/md`
-here (see below for why and how to get it separately):
+Run the core suite twice, once per MPM. This matches what CI does, and
+what upstream httpd's own CI does for its pytest-based job:
 
     MPM=event  pytest test/modules/core test/modules/http1 \
         test/modules/http2 test/modules/proxy
@@ -201,7 +201,66 @@ Expected result per run: ~449 passed, 9 skipped. Skips are all legitimate:
 two tests requiring httpd 2.5.0+, one hardcoded skip for a known 304/Vary
 bug in 2.4.x, and h2load load tests.
 
-Collect coverage after both runs (do not clean between them):
+### mod_md
+
+`test/modules/md` (the ACME/mod_md suite) runs too, as its own step,
+without cleaning gcda in between — same tree, same final `gcovr` pass
+below. Upstream httpd's own CI (`.github/workflows/linux.yml`) still
+disables this job entirely ("pebble install is broken"); it's kept
+running here but with `continue-on-error` and a tight timeout in
+`coverage.yml`, because it's genuinely timing-sensitive against a live
+ACME server — a race in mod_md's own ACME driver can occasionally cause
+a handful of failures independent of anything in this repo (see
+`presentation/process-verification-notes.md`). An occasional
+partial-failure run just contributes partial coverage instead of
+breaking the whole pipeline, the same way flaky SSL/PHP tests already
+do elsewhere here.
+
+Prerequisites: `pebble` built and in `$PATH`
+(`go install github.com/letsencrypt/pebble/v2/cmd/pebble@latest` and
+`go install github.com/letsencrypt/pebble/v2/cmd/pebble-challtestsrv@latest`).
+
+Most of this suite is gated on `a2md` (the mod_md CLI) being present in
+`$PREFIX/bin` — without it, `MDTestEnv.has_a2md()` silently skips most
+test files. On httpd revisions at or after r1937403, `a2md` builds
+automatically from `support/a2md/` alongside the rest of httpd (needs
+curl/jansson/openssl dev headers, already in the prerequisites above);
+r1937474 added it to `make install` too, so a checkout on or after that
+revision needs nothing extra. Between those two revisions, copy it
+manually:
+
+    cp $HTTPD_ROOT/support/a2md/a2md $PREFIX/bin/a2md
+
+On an older checkout without `support/a2md/` at all, those tests just
+skip — there's no separate package to substitute; the `a2md` binary
+needs to come from the same commit as the `mod_md` it's driving.
+
+`test/gen/` must be fresh before running — pebble generates a new root CA
+every time it starts, and a stale `test/gen/` from a previous run leaves
+`a2md` trusting a CA that no longer matches what pebble presents, which
+looks like a generic "unsuccessful contacting ACME server" failure:
+
+    rm -rf $HTTPD_ROOT/test/gen
+    MPM=event pytest test/modules/md/ || true
+
+Expect some real failures on occasion, unrelated to staleness:
+
+- Config-validation tests that check status on managed domains without an
+  issued certificate (e.g. `test_md_300_025`, anything using `MDRenewMode
+  manual`) fail cert verification against mod_md's fallback self-signed
+  cert — a gap in how the test checks status, not an environment problem.
+- `apache_stop()`'s hardcoded 10-second shutdown-confirmation timeout
+  occasionally fires before httpd actually finishes exiting, which can
+  leave it still bound to its ports for the next test in the file. If a
+  test fails with "Address already in use", that's why — kill any leftover
+  `httpd` process bound to the test ports and rerun just that file.
+
+### Collect coverage
+
+One `gcovr` pass after all the runs above (core/http1/http2/proxy on both
+MPMs, plus md) — it scans whatever ran against this `$HTTPD_ROOT`
+regardless of which pytest invocations contributed, so there's nothing
+separate to merge:
 
     gcovr -r $HTTPD_ROOT \
         --gcov-ignore-errors output_error \
@@ -214,73 +273,9 @@ Collect coverage after both runs (do not clean between them):
         coverage/raw/python.json \
         coverage/processed/python.norm.json
 
-### Collect mod_md coverage locally
-
-`test/modules/md` (the ACME/mod_md suite) is deliberately not run in
-`coverage.yml` — upstream httpd's own CI has this disabled with the comment
-"pebble install is broken", and it isn't reliable in a fresh, unattended
-CI environment. It does work locally with supervision, so its coverage is
-collected separately and merged in rather than skipped outright.
-
-Prerequisites: `pebble` built and in `$PATH`
-(`go install github.com/letsencrypt/pebble/v2/cmd/pebble@latest`).
-
-Most of this suite is gated on `a2md` (the mod_md CLI) being present in
-`$PREFIX/bin` — without it, `MDTestEnv.has_a2md()` silently skips most
-test files. On httpd revisions at or after r1937403, `a2md` builds
-automatically from `support/a2md/` alongside the rest of httpd (needs
-curl/jansson/openssl dev headers, already in the prerequisites above),
-but `make install` doesn't install it yet, so copy it manually:
-
-    cp $HTTPD_ROOT/support/a2md/a2md $PREFIX/bin/a2md
-
-On an older checkout without `support/a2md/`, those tests just skip —
-there's no separate package to substitute; the `a2md` binary needs to
-come from the same commit as the `mod_md` it's driving, so building it
-from that same tree is the only correct way to get it.
-
-`test/gen/` must be fresh before running — pebble generates a new root CA
-every time it starts, and a stale `test/gen/` from a previous run leaves
-`a2md` trusting a CA that no longer matches what pebble presents, which
-looks like a generic "unsuccessful contacting ACME server" failure:
-
-    rm -rf $HTTPD_ROOT/test/gen
-    MPM=event pytest test/modules/md/ || true
-
-Expect some real failures even on a clean run, unrelated to staleness:
-
-- Config-validation tests that check status on managed domains without an
-  issued certificate (e.g. `test_md_300_025`, anything using `MDRenewMode
-  manual`) fail cert verification against mod_md's fallback self-signed
-  cert — a gap in how the test checks status, not an environment problem.
-- `apache_stop()`'s hardcoded 10-second shutdown-confirmation timeout
-  occasionally fires before httpd actually finishes exiting, which can
-  leave it still bound to its ports for the next test in the file. If a
-  test fails with "Address already in use", that's why — kill any leftover
-  `httpd` process bound to the test ports and rerun just that file.
-
-These still contribute partial mod_md coverage even when failing, the same
-way `t/ssl/*` does on the Perl side. Collect and normalize its coverage
-into its own file — don't overwrite `python.norm.json` directly yet:
-
-    gcovr -r $HTTPD_ROOT \
-        --gcov-ignore-errors output_error \
-        --gcov-ignore-errors no_working_dir_found \
-        --gcov-ignore-parse-errors all \
-        --merge-mode-functions=merge-use-line-min \
-        --json coverage/raw/python_md.json
-
-    python coverage/tools/normalize_gcovr.py \
-        coverage/raw/python_md.json \
-        coverage/processed/python_md.norm.json
-
-Then merge it into the `python.norm.json` produced by CI (or by the steps
-above):
-
-    python coverage/tools/merge_coverage.py \
-        coverage/processed/python.norm.json \
-        coverage/processed/python_md.norm.json \
-        coverage/processed/python.norm.json
+`coverage/tools/merge_coverage.py` is still there for the general case —
+unioning any two already-normalized coverage files — but it's no longer
+needed for mod_md specifically now that it runs in the same job.
 
 ## Coverage diff
 
@@ -314,45 +309,40 @@ and Consolidation.
 ## Running the whole pipeline in CI
 
 `.github/workflows/coverage.yml` runs every step above end to end, in
-order, in a single job — except `test/modules/md`, which it deliberately
-excludes (see "Collect mod_md coverage locally" above): build httpd, run
-each Perl test individually (with SSL backend rotation) and merge the
-results, run the Python suite minus md (both MPMs), diff the two, then
-compute the migration ranking. Trigger it manually from the Actions tab
+order, in a single job, including `test/modules/md` (with
+`continue-on-error` — see "mod_md" above for why): build httpd, run each
+Perl test individually (with SSL backend rotation) and merge the results,
+run the Python suite including md (both MPMs), diff the two, then compute
+the migration ranking. Trigger it manually from the Actions tab
 (`workflow_dispatch`, optional `httpd_ref` input, defaults to `trunk`)
 and download the `coverage-<run-id>` artifact for the results.
 
 Budget a couple of hours — the per-test loop (206 tests, some rerun 3x
-for SSL) is by far the slowest part. Once you have the artifact, merge in
-a locally-collected `python_md.norm.json` before running the diff/ranking
-steps if you want mod_md represented in the final numbers.
+for SSL) is by far the slowest part; mod_md adds only a few minutes.
 
 ```mermaid
 flowchart TD
-    A["Install dependencies<br/>apt-get / cpanm / pip"]
+    A["Install dependencies<br/>apt-get / cpanm / pip / go install pebble"]
     B["Build httpd, coverage-instrumented<br/>buildconf, configure, make"]
     C["Prepare Perl test framework<br/>perl Makefile.PL -apxs"]
     D["Run each Perl test in isolation, 206x<br/>t/ssl/* rerun 3x for backends<br/>create_per_test.sh"]
     E["Merge into aggregate Perl coverage<br/>analyze_per_test.py --merged-json"]
     F["Baseline raw/perl.json from a per-test scan<br/>cp per_test/perl/raw/*.json"]
     G["Clean gcda<br/>clean_gcda.sh"]
-    H["Run Python suite (no md), event + worker MPM<br/>pytest test/modules/core http1 http2 proxy"]
+    H["Run Python suite, event + worker MPM<br/>pytest core http1 http2 proxy + md"]
     I["Collect Python coverage<br/>gcovr, normalize_gcovr.py"]
     J["Diff coverage<br/>coverage_diff.py"]
     K["Migration ranking<br/>analyze_consolidation.py"]
     L["Dashboard - run manually, not part of coverage.yml<br/>dashboard.py"]
-    M["mod_md coverage - run manually, local only<br/>pytest test/modules/md, merge_coverage.py"]
 
     A --> B --> C --> D --> E --> F --> G --> H --> I --> J --> K
     J -.-> L
     K -.-> L
-    M -.-> I
 ```
 
 Every box is one concept-level stage; the second line names the script
-or tool that actually does it. The Dashboard and mod_md boxes are dashed
-because they're separate, manual steps — neither is invoked by the
-workflow.
+or tool that actually does it. The Dashboard box is dashed because it's
+a separate, manual step — it isn't invoked by the workflow.
 
 ## Looking at results without running the pipeline
 
@@ -368,12 +358,11 @@ successful `coverage.yml` run on the Actions tab, unzip it into
 
     streamlit run coverage/tools/dashboard.py
 
-That artifact does **not** include mod_md — `coverage.yml` doesn't run
-it (see above). For the complete picture, also do the local mod_md
-collection and merge described in "Collect mod_md coverage locally"
-before running the dashboard. Without that step, the Python-side numbers
-undercount by whatever mod_md contributes — expect the Overview and
-Python Focus tabs to look meaningfully different once it's merged in.
+That artifact includes mod_md — it's part of the same CI run (see
+"mod_md" above). Since that step runs with `continue-on-error`, check
+the run's logs if a specific number looks off; an occasional partial
+mod_md failure still contributes partial coverage rather than skewing
+the artifact.
 
 ## Scripts
 
