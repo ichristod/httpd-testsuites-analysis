@@ -161,15 +161,23 @@ jobs:
 
       # a2md (the mod_md CLI) builds automatically from support/a2md/ on
       # branches that have it (added to trunk in r1937403), once
-      # curl/jansson/openssl dev headers are present - but `make install`
-      # doesn't copy it into $PREFIX/bin yet. Do it explicitly so the
-      # Python test suite's has_a2md() check finds it. Older branches
+      # curl/jansson/openssl dev headers are present. Upstream r1937474
+      # added it to `make install` too, so this is only needed for a
+      # httpd_ref between those two revisions, or not at all going
+      # forward - kept as a harmless no-op otherwise. Older branches
       # (2.4.x) don't have support/a2md/ at all, so this is a no-op there.
       - name: Install a2md
         run: |
           if [ -f "$HTTPD_ROOT/support/a2md/a2md" ]; then
             cp "$HTTPD_ROOT/support/a2md/a2md" "$PREFIX/bin/a2md"
           fi
+
+      # test/modules/md needs pebble as its local ACME test server.
+      - name: Install pebble
+        run: |
+          go install github.com/letsencrypt/pebble/v2/cmd/pebble@latest
+          go install github.com/letsencrypt/pebble/v2/cmd/pebble-challtestsrv@latest
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
       # ── Perl test suite ────────────────────────────────────────────────────
       # Perl coverage comes only from the per-test loop below, unioned back
@@ -203,11 +211,6 @@ jobs:
           $ANALYSIS_ROOT/coverage/tools/clean_gcda.sh
 
       # ── Python test suite ──────────────────────────────────────────────────
-      # No test/modules/md — upstream httpd's own CI (.github/workflows/linux.yml)
-      # has the ACME/mod_md job disabled ("pebble install is broken"), and its
-      # one working pytest job excludes TEST_MD too. md coverage is collected
-      # locally instead and merged in — see README's "Collect mod_md coverage
-      # locally" section.
       - name: Run Python test suite — event MPM
         timeout-minutes: 40
         run: |
@@ -221,6 +224,21 @@ jobs:
           cd $HTTPD_ROOT
           MPM=worker pytest test/modules/core test/modules/http1 \
             test/modules/http2 test/modules/proxy || true
+
+      # Experimental: upstream httpd's own CI (.github/workflows/linux.yml)
+      # has the ACME/mod_md job disabled ("pebble install is broken"), and
+      # md coverage has so far been collected locally and merged in instead
+      # (see README's "Collect mod_md coverage locally" section). Trying it
+      # here now that a2md is wired up. continue-on-error + a tight timeout
+      # so that if the known apache_stop() shutdown-race flakiness (README)
+      # causes a cascading hang on a shared runner, it fails only this step
+      # instead of the whole job losing the Perl results too.
+      - name: Run Python test suite — mod_md (experimental)
+        timeout-minutes: 45
+        continue-on-error: true
+        run: |
+          cd $HTTPD_ROOT
+          MPM=event pytest test/modules/md/ || true
 
       - name: Collect Python coverage
         run: |
