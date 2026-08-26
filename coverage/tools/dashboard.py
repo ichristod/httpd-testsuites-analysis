@@ -52,6 +52,29 @@ def basename(path):
         return path.split("/")[-1]
     return path
 
+
+def suite_file_rows(raw):
+    rows = []
+    for fname, info in sorted(raw.items()):
+        rows.append({
+            "Source File": basename(fname),
+            "Module": file_to_module(fname),
+            "Executable Lines": info["total"],
+            "Lines Covered": info["covered"],
+            "Coverage %": round(info["covered"] / info["total"] * 100, 1) if info["total"] else 0,
+        })
+    return rows
+
+
+def suite_by_module(raw):
+    by_module = {}
+    for fname, info in raw.items():
+        mod = file_to_module(fname)
+        e = by_module.setdefault(mod, {"total": 0, "covered": 0})
+        e["total"] += info["total"]
+        e["covered"] += info["covered"]
+    return by_module
+
 # -- data loading --
 @st.cache_data
 def load_json(path):
@@ -123,40 +146,12 @@ def load_all():
         })
 
     # per-suite file tables
-    py_file_rows = []
-    for fname, info in sorted(py_raw.items()):
-        py_file_rows.append({
-            "Source File": basename(fname),
-            "Module": file_to_module(fname),
-            "Executable Lines": info["total"],
-            "Lines Covered": info["covered"],
-            "Coverage %": round(info["covered"] / info["total"] * 100, 1) if info["total"] else 0,
-        })
-
-    perl_file_rows = []
-    for fname, info in sorted(perl_raw.items()):
-        perl_file_rows.append({
-            "Source File": basename(fname),
-            "Module": file_to_module(fname),
-            "Executable Lines": info["total"],
-            "Lines Covered": info["covered"],
-            "Coverage %": round(info["covered"] / info["total"] * 100, 1) if info["total"] else 0,
-        })
+    py_file_rows = suite_file_rows(py_raw)
+    perl_file_rows = suite_file_rows(perl_raw)
 
     # per-module aggregation
-    py_by_module = {}
-    for fname, info in py_raw.items():
-        mod = file_to_module(fname)
-        e = py_by_module.setdefault(mod, {"total": 0, "covered": 0})
-        e["total"] += info["total"]
-        e["covered"] += info["covered"]
-
-    perl_by_module = {}
-    for fname, info in perl_raw.items():
-        mod = file_to_module(fname)
-        e = perl_by_module.setdefault(mod, {"total": 0, "covered": 0})
-        e["total"] += info["total"]
-        e["covered"] += info["covered"]
+    py_by_module = suite_by_module(py_raw)
+    perl_by_module = suite_by_module(perl_raw)
 
     # overlap table
     overlap_rows = []

@@ -260,9 +260,6 @@ def main():
 
     print(f"{len(per_test)} perl tests, python covers {len(py_flat)} lines, gap: {gap_size} lines")
 
-    # # how many perl tests hit each (file, line) pair
-    # extract how many times perl test hit (file, line) pairs
-    # we need it to identify shared common files (infra)
     freq = count_line_freq(per_test)
 
     # lines hit by >25% of tests are infrastructure

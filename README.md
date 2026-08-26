@@ -11,7 +11,7 @@ around the results.
 
 ## Prerequisites
 
-- Linux (tested on Fedora 43)
+- Linux (tested on Fedora 44)
 - gcc with gcov support
 - gcovr
 - Python 3.11+ with pip/venv
@@ -55,9 +55,9 @@ Python venv (inside this repo):
 
 `gcovr` is pinned for reproducibility. If you bump the version, verify
 coverage output is still substantial (hundreds of files, not a
-handful) — see `presentation/process-verification-notes.md` for the
-near-zero-coverage bug this project hit and how it was tracked down to
-`--gcov-ignore-errors` (below), not the gcovr version.
+handful) — coverage can silently collapse to near-zero if
+`--gcov-ignore-errors` gets loosened back to `all` (see
+`presentation/process-verification-notes.md` for the mechanism).
 
 ## Setup
 
@@ -188,34 +188,6 @@ Clean gcov data before running the other suite:
 
 ## Collect Python suite coverage
 
-### Python 3.13+ compatibility note
-
-The http2 test module uses a `@classmethod @property` pattern that broke in
-Python 3.13. On Python 3.13+ every http2 test class is incorrectly skipped
-because `H2TestEnv.is_unsupported` resolves to the bound method object
-(truthy) instead of calling it.
-
-The fix already applied in `$HTTPD_ROOT/test/modules/http2/env.py` is to drop
-`@property` and keep only `@classmethod`, then update all 34 test files to
-call `H2TestEnv.is_unsupported()` with explicit parentheses instead of
-passing the method object to `skipif(condition=...)`.
-
-If you are working on a fresh httpd checkout that does not have this fix,
-apply it in `env.py`:
-
-```diff
--    @classmethod
--    @property
--    def is_unsupported(cls):
-+    @classmethod
-+    def is_unsupported(cls):
-         mpm_module = f"mpm_{os.environ['MPM']}" if 'MPM' in os.environ else 'mpm_event'
-         return mpm_module == 'mpm_prefork'
-```
-
-Then update every `skipif(condition=H2TestEnv.is_unsupported, ...)` line in
-`test/modules/http2/test_*.py` to `skipif(condition=H2TestEnv.is_unsupported(), ...)`.
-
 Run the suite twice, once per MPM. This matches what CI does, and what
 upstream httpd's own CI does for its pytest-based job — no `test/modules/md`
 here (see below for why and how to get it separately):
@@ -236,7 +208,6 @@ Collect coverage after both runs (do not clean between them):
         --gcov-ignore-errors no_working_dir_found \
         --gcov-ignore-parse-errors all \
         --merge-mode-functions=merge-use-line-min \
-        --exclude 'conftest' --exclude 'modules/apreq/' \
         --json coverage/raw/python.json
 
     python coverage/tools/normalize_gcovr.py \
@@ -253,6 +224,20 @@ collected separately and merged in rather than skipped outright.
 
 Prerequisites: `pebble` built and in `$PATH`
 (`go install github.com/letsencrypt/pebble/v2/cmd/pebble@latest`).
+
+Most of this suite is gated on `a2md` (the mod_md CLI) being present in
+`$PREFIX/bin` — without it, `MDTestEnv.has_a2md()` silently skips most
+test files. On httpd revisions at or after r1937403, `a2md` builds
+automatically from `support/a2md/` alongside the rest of httpd (needs
+curl/jansson/openssl dev headers, already in the prerequisites above),
+but `make install` doesn't install it yet, so copy it manually:
+
+    cp $HTTPD_ROOT/support/a2md/a2md $PREFIX/bin/a2md
+
+On an older checkout without `support/a2md/`, those tests just skip —
+there's no separate package to substitute; the `a2md` binary needs to
+come from the same commit as the `mod_md` it's driving, so building it
+from that same tree is the only correct way to get it.
 
 `test/gen/` must be fresh before running — pebble generates a new root CA
 every time it starts, and a stale `test/gen/` from a previous run leaves
@@ -283,7 +268,6 @@ into its own file — don't overwrite `python.norm.json` directly yet:
         --gcov-ignore-errors no_working_dir_found \
         --gcov-ignore-parse-errors all \
         --merge-mode-functions=merge-use-line-min \
-        --exclude 'conftest' --exclude 'modules/apreq/' \
         --json coverage/raw/python_md.json
 
     python coverage/tools/normalize_gcovr.py \
@@ -338,7 +322,7 @@ compute the migration ranking. Trigger it manually from the Actions tab
 (`workflow_dispatch`, optional `httpd_ref` input, defaults to `trunk`)
 and download the `coverage-<run-id>` artifact for the results.
 
-Budget a couple of hours — the per-test loop (205 tests, some rerun 3x
+Budget a couple of hours — the per-test loop (206 tests, some rerun 3x
 for SSL) is by far the slowest part. Once you have the artifact, merge in
 a locally-collected `python_md.norm.json` before running the diff/ranking
 steps if you want mod_md represented in the final numbers.
@@ -348,7 +332,7 @@ flowchart TD
     A["Install dependencies<br/>apt-get / cpanm / pip"]
     B["Build httpd, coverage-instrumented<br/>buildconf, configure, make"]
     C["Prepare Perl test framework<br/>perl Makefile.PL -apxs"]
-    D["Run each Perl test in isolation, 205x<br/>t/ssl/* rerun 3x for backends<br/>create_per_test.sh"]
+    D["Run each Perl test in isolation, 206x<br/>t/ssl/* rerun 3x for backends<br/>create_per_test.sh"]
     E["Merge into aggregate Perl coverage<br/>analyze_per_test.py --merged-json"]
     F["Baseline raw/perl.json from a per-test scan<br/>cp per_test/perl/raw/*.json"]
     G["Clean gcda<br/>clean_gcda.sh"]

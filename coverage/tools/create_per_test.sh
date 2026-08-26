@@ -29,10 +29,11 @@ total=0
 ok=0
 fail=0
 
-find "$PERL_FRAMEWORK/t" -name '*.t' -type f | sort | while read -r tfile; do
+while read -r tfile; do
   rel=${tfile#$PERL_FRAMEWORK/}
 
-  # change t/apache/headers.t into apache__headers (had difficulties to recognize test)
+  # flatten t/apache/headers.t into apache__headers so it's a valid,
+  # unique filename for this test's output files
   name=${rel#t/}
   name=${name%.t}
   name=${name//\//__}
@@ -64,15 +65,15 @@ find "$PERL_FRAMEWORK/t" -name '*.t' -type f | sort | while read -r tfile; do
   # stop httpd to get gcda flushed
   (cd "$PERL_FRAMEWORK" && ./t/TEST -stop 2>/dev/null || true)
 
-  # capture coverage
+  # capture coverage. --config /dev/null: skip any gcovr config file that
+  # might exist somewhere in the fetched httpd tree, since we always want
+  # the flags below and nothing else.
   if gcovr -r "$HTTPD_ROOT" \
        --config /dev/null \
        --gcov-ignore-errors output_error \
        --gcov-ignore-errors no_working_dir_found \
        --gcov-ignore-parse-errors all \
        --merge-mode-functions=merge-use-line-min \
-       --exclude 'conftest(\.c|\.gcno|\.gcda)?$' \
-       --exclude 'modules/apreq/' \
        --json "$outdir/raw/${name}.json"; then
 
     # normalize coverage
@@ -86,6 +87,6 @@ find "$PERL_FRAMEWORK/t" -name '*.t' -type f | sort | while read -r tfile; do
   fi
 
   echo
-done
+done < <(find "$PERL_FRAMEWORK/t" -name '*.t' -type f | sort)
 
 echo "done: $total tests, $ok ok, $fail failed"
