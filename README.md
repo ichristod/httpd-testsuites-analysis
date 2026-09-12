@@ -189,32 +189,34 @@ Clean gcov data before running the other suite:
 
 ## Collect Python suite coverage
 
-Run the core suite twice, once per MPM. This matches what CI does, and
-what upstream httpd's own CI does for its pytest-based job:
+Run the suite twice, once per MPM:
 
     MPM=event  pytest test/modules/core test/modules/http1 \
-        test/modules/http2 test/modules/proxy
+        test/modules/http2 test/modules/proxy test/modules/aaa \
+        test/modules/metadata
     MPM=worker pytest test/modules/core test/modules/http1 \
-        test/modules/http2 test/modules/proxy
+        test/modules/http2 test/modules/proxy test/modules/aaa \
+        test/modules/metadata
 
-Expected result per run: ~449 passed, 9 skipped. Skips are all legitimate:
-two tests requiring httpd 2.5.0+, one hardcoded skip for a known 304/Vary
-bug in 2.4.x, and h2load load tests.
+`aaa` (digest-auth tests) and `metadata` (mime-magic tests) were added
+to this list once they existed upstream — check `git log` on
+`test/modules/` before assuming this list is exhaustive; pyhttpd keeps
+growing new top-level test directories.
 
 ### mod_md
 
 `test/modules/md` (the ACME/mod_md suite) runs too, as its own step,
 without cleaning gcda in between — same tree, same final `gcovr` pass
-below. Upstream httpd's own CI (`.github/workflows/linux.yml`) still
-disables this job entirely ("pebble install is broken"); it's kept
-running here but with `continue-on-error` and a tight timeout in
-`coverage.yml`, because it's genuinely timing-sensitive against a live
-ACME server — a race in mod_md's own ACME driver can occasionally cause
-a handful of failures independent of anything in this repo (see
-`presentation/process-verification-notes.md`). An occasional
-partial-failure run just contributes partial coverage instead of
-breaking the whole pipeline, the same way flaky SSL/PHP tests already
-do elsewhere here.
+below. It's kept running here with `continue-on-error` and a tight
+timeout in `coverage.yml`, because it's genuinely timing-sensitive
+against a live ACME server — a race in mod_md's own ACME driver can
+occasionally cause a handful of failures independent of anything in
+this repo (see `presentation/process-verification-notes.md`). An
+occasional partial-failure run just contributes partial coverage
+instead of breaking the whole pipeline, the same way flaky SSL/PHP
+tests already do elsewhere here. Upstream httpd's own CI now runs its
+ACME/mod_md tests too (`.github/workflows/linux.yml`, gated on `pebble`
+being on `PATH`) — it used to disable this entirely.
 
 Prerequisites: `pebble` built and in `$PATH`
 (`go install github.com/letsencrypt/pebble/v2/cmd/pebble@latest` and

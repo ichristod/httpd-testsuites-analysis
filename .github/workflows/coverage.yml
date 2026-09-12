@@ -216,23 +216,21 @@ jobs:
         run: |
           cd $HTTPD_ROOT
           MPM=event pytest test/modules/core test/modules/http1 \
-            test/modules/http2 test/modules/proxy || true
+            test/modules/http2 test/modules/proxy test/modules/aaa \
+            test/modules/metadata || true
 
       - name: Run Python test suite — worker MPM
         timeout-minutes: 40
         run: |
           cd $HTTPD_ROOT
           MPM=worker pytest test/modules/core test/modules/http1 \
-            test/modules/http2 test/modules/proxy || true
+            test/modules/http2 test/modules/proxy test/modules/aaa \
+            test/modules/metadata || true
 
-      # Experimental: upstream httpd's own CI (.github/workflows/linux.yml)
-      # has the ACME/mod_md job disabled ("pebble install is broken"), and
-      # md coverage has so far been collected locally and merged in instead
-      # (see README's "Collect mod_md coverage locally" section). Trying it
-      # here now that a2md is wired up. continue-on-error + a tight timeout
-      # so that if the known apache_stop() shutdown-race flakiness (README)
-      # causes a cascading hang on a shared runner, it fails only this step
-      # instead of the whole job losing the Perl results too.
+      # continue-on-error + a tight timeout so that if the known
+      # apache_stop() shutdown-race flakiness (README) causes a cascading
+      # hang on a shared runner, it fails only this step instead of the
+      # whole job losing the Perl results too.
       - name: Run Python test suite — mod_md (experimental)
         timeout-minutes: 45
         continue-on-error: true
