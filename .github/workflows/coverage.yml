@@ -255,6 +255,43 @@ jobs:
             test/modules/http2 test/modules/proxy test/modules/aaa \
             test/modules/metadata || true
 
+      # --enable-mpms-shared=all already builds every Linux MPM (event,
+      # worker, prefork, motorz, simple) as a shared module - confirmed
+      # directly from a real build log. pyhttpd's own env.py has no
+      # hardcoded MPM whitelist (just f"mpm_{os.environ['MPM']}"), so any
+      # of them can be runtime-selected with zero extra build cost. None
+      # of these three has ever been run against pyhttpd here or, as far
+      # as this project could find, in upstream's own CI either - this is
+      # genuinely unverified territory, not a known-good config, hence
+      # continue-on-error on each: a failure under one MPM shouldn't cost
+      # the Perl results or the event/worker runs above.
+      - name: Run Python test suite — prefork MPM (experimental)
+        timeout-minutes: 40
+        continue-on-error: true
+        run: |
+          cd $HTTPD_ROOT
+          MPM=prefork pytest test/modules/core test/modules/http1 \
+            test/modules/http2 test/modules/proxy test/modules/aaa \
+            test/modules/metadata || true
+
+      - name: Run Python test suite — motorz MPM (experimental)
+        timeout-minutes: 40
+        continue-on-error: true
+        run: |
+          cd $HTTPD_ROOT
+          MPM=motorz pytest test/modules/core test/modules/http1 \
+            test/modules/http2 test/modules/proxy test/modules/aaa \
+            test/modules/metadata || true
+
+      - name: Run Python test suite — simple MPM (experimental)
+        timeout-minutes: 40
+        continue-on-error: true
+        run: |
+          cd $HTTPD_ROOT
+          MPM=simple pytest test/modules/core test/modules/http1 \
+            test/modules/http2 test/modules/proxy test/modules/aaa \
+            test/modules/metadata || true
+
       # continue-on-error + a tight timeout so that if the known
       # apache_stop() shutdown-race flakiness (README) causes a cascading
       # hang on a shared runner, it fails only this step instead of the

@@ -204,14 +204,33 @@ Clean gcov data before running the other suite:
 
 ## Collect Python suite coverage
 
-Run the suite twice, once per MPM:
+`--enable-mpms-shared=all` builds every Linux MPM (`event`, `worker`,
+`prefork`, `motorz`, `simple`) as a loadable module in the same build —
+`pyhttpd`'s `env.py` has no MPM whitelist, it just loads whichever one
+`$MPM` names, so all five can be exercised without a rebuild. Run the
+suite once per MPM:
 
-    MPM=event  pytest test/modules/core test/modules/http1 \
+    MPM=event   pytest test/modules/core test/modules/http1 \
         test/modules/http2 test/modules/proxy test/modules/aaa \
         test/modules/metadata
-    MPM=worker pytest test/modules/core test/modules/http1 \
+    MPM=worker  pytest test/modules/core test/modules/http1 \
         test/modules/http2 test/modules/proxy test/modules/aaa \
         test/modules/metadata
+    MPM=prefork pytest test/modules/core test/modules/http1 \
+        test/modules/http2 test/modules/proxy test/modules/aaa \
+        test/modules/metadata
+    MPM=motorz  pytest test/modules/core test/modules/http1 \
+        test/modules/http2 test/modules/proxy test/modules/aaa \
+        test/modules/metadata
+    MPM=simple  pytest test/modules/core test/modules/http1 \
+        test/modules/http2 test/modules/proxy test/modules/aaa \
+        test/modules/metadata
+
+`prefork`/`motorz`/`simple` are new here and experimental — nobody had
+run `pyhttpd` under them before (not even upstream's own CI, which only
+ever runs `pyhttpd` under a hardcoded `event` build; its MPM-diversity
+jobs test the classic Perl suite instead). `coverage.yml` runs these
+three with `continue-on-error: true` for exactly that reason.
 
 `aaa` (digest-auth tests) and `metadata` (mime-magic tests) were added
 to this list once they existed upstream — check `git log` on
