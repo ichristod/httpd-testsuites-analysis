@@ -143,6 +143,19 @@ is left to accumulate across those three reruns so the coverage captured
 for that test is their union. This needs redis and memcached reachable
 at `localhost:6379` and `localhost:11211`.
 
+`t/modules/ldap.t` is special-cased too: it's the only Perl test that
+exercises `mod_authnz_ldap`/`util_ldap.c`, and its own header comment
+documents exactly what it needs — an LDAP server with root DN
+`dc=example,dc=com` on `localhost:8389`, seeded from the LDIF the suite
+already ships (`$PERL_FRAMEWORK/scripts/httpd.ldif`), and `-defines
+LDAP` passed to `./t/TEST` so its `<IfDefine>` vhost config gets
+included. Without all three it just skips ("LDAP testing not
+configured") rather than failing — same non-fatal pattern as the SSL
+backends above. Seed it once before running the suite:
+
+    ldapadd -x -D "cn=admin,dc=example,dc=com" -w admin \
+        -H ldap://localhost:8389 -f "$PERL_FRAMEWORK/scripts/httpd.ldif"
+
 ### Expected test failures
 
 Some tests require external services that are not set up by default:
@@ -151,6 +164,8 @@ Some tests require external services that are not set up by default:
   above fail to start and you fall back to whatever the default
   (`shmcb`) backend alone gives you. Still contributes partial SSL
   coverage even when failing.
+- `t/modules/ldap.t` — without an LDAP server seeded and reachable at
+  `localhost:8389`, skips entirely rather than failing.
 - `t/apache/snihostcheck.t`, `t/modules/proxy_websockets_ssl.t` — both
   require HTTPS and fail for the same reason as the SSL tests above.
 - `t/protocol/echo.t` — requires a backend echo server.

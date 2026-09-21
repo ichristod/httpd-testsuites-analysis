@@ -56,6 +56,16 @@ while read -r tfile; do
       fi
       (cd "$PERL_FRAMEWORK" && ./t/TEST -stop 2>/dev/null || true)
     done
+  elif [[ "$rel" == t/modules/ldap.t ]]; then
+    # this test's own header comment documents what it needs: an LDAP
+    # server seeded and reachable, plus -defines LDAP so its <IfDefine>
+    # vhost config gets included - without the define it just skips.
+    if (cd "$PERL_FRAMEWORK" && ./t/TEST -defines LDAP -start); then
+      (cd "$PERL_FRAMEWORK" && ./t/TEST -verbose "$rel") || echo "$rel failed, continuing"
+    else
+      echo "$rel failed to start, skipping"
+    fi
+    (cd "$PERL_FRAMEWORK" && ./t/TEST -stop 2>/dev/null || true)
   else
     if ! (cd "$PERL_FRAMEWORK" && ./t/TEST -verbose "$rel"); then
       echo "$rel failed, collecting coverage anyway"
