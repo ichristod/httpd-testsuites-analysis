@@ -144,17 +144,18 @@ for that test is their union. This needs redis and memcached reachable
 at `localhost:6379` and `localhost:11211`.
 
 `t/modules/ldap.t` is special-cased too: it's the only Perl test that
-exercises `mod_authnz_ldap`/`util_ldap.c`, and its own header comment
-documents exactly what it needs — an LDAP server with root DN
-`dc=example,dc=com` on `localhost:8389`, seeded from the LDIF the suite
-already ships (`$PERL_FRAMEWORK/scripts/httpd.ldif`), and `-defines
-LDAP` passed to `./t/TEST` so its `<IfDefine>` vhost config gets
-included. Without all three it just skips ("LDAP testing not
-configured") rather than failing — same non-fatal pattern as the SSL
-backends above. Seed it once before running the suite:
+exercises `mod_authnz_ldap`/`util_ldap.c`, and needs a real LDAP server
+to run instead of skipping ("LDAP testing not configured"). Rather than
+stand up our own, this repo runs the exact same setup
+`apache/httpd`'s own CI has used for years (`TEST_LDAP` in
+`test/travis_before_linux.sh`): build `test/travis_Dockerfile_slapd.centos`
+(a plain slapd, no third-party image) and run `httpd-tests`' own
+`scripts/ldap-init.sh`, which starts two servers — one at `localhost:8389`,
+one at `localhost:8390` as the referral target for the one subtest that
+needs it — and seeds both from the LDIFs the suite already ships.
 
-    ldapadd -x -D "cn=admin,dc=example,dc=com" -w admin \
-        -H ldap://localhost:8389 -f "$PERL_FRAMEWORK/scripts/httpd.ldif"
+    docker build -t httpd_ldap -f "$HTTPD_ROOT/test/travis_Dockerfile_slapd.centos" "$HTTPD_ROOT/test/"
+    cd $PERL_FRAMEWORK && ./scripts/ldap-init.sh
 
 ### Expected test failures
 

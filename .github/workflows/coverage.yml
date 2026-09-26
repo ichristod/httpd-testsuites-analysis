@@ -33,21 +33,6 @@ jobs:
       memcached:
         image: memcached:1
         ports: ['11211:11211']
-      # For t/modules/ldap.t (mod_authnz_ldap) - skips without this. Base
-      # DN derives from LDAP_DOMAIN as dc=example,dc=com, matching what
-      # that test expects; port 8389 matches its hardcoded expectation too.
-      ldap:
-        image: osixia/openldap:1.5.0
-        env:
-          LDAP_ORGANISATION: "Example"
-          LDAP_DOMAIN: "example.com"
-          LDAP_ADMIN_PASSWORD: "admin"
-        ports: ['8389:389']
-        options: >-
-          --health-cmd "ldapsearch -x -H ldap://localhost -b dc=example,dc=com -D cn=admin,dc=example,dc=com -w admin"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
 
     steps:
       # ── Checkouts ──────────────────────────────────────────────────────────
@@ -203,17 +188,23 @@ jobs:
           cd $PERL_FRAMEWORK
           perl Makefile.PL -apxs $PREFIX/bin/apxs
 
-      # t/modules/ldap.t documents its own requirements (see the file's
-      # header comment): an LDAP server, root DN dc=example,dc=com, on
-      # localhost:8389, seeded from the LDIF the suite already ships.
-      # Without this, that test skips with "LDAP testing not configured"
-      # and modules/ldap/util_ldap.c + modules/aaa/mod_authnz_ldap.c stay
-      # uncovered by the Perl suite - not because nobody wrote the test,
-      # but because the infrastructure it needs was never provided.
-      - name: Seed LDAP directory for t/modules/ldap.t
+      # t/modules/ldap.t needs an LDAP server; without one it skips with
+      # "LDAP testing not configured" and modules/ldap/util_ldap.c +
+      # modules/aaa/mod_authnz_ldap.c stay uncovered - not because nobody
+      # wrote the test, but because the infrastructure it needs was never
+      # provided. This is exactly upstream's own TEST_LDAP setup from
+      # test/travis_before_linux.sh: build their slapd image, run their
+      # script. Two servers, not one - the second (8390) is the referral
+      # target for the one subtest that needs it. Not our own setup to
+      # maintain or debug: same Dockerfile and script apache/httpd's own
+      # CI has run for years.
+      - name: Build upstream's slapd image for t/modules/ldap.t
+        run: docker build -t httpd_ldap -f "$HTTPD_ROOT/test/travis_Dockerfile_slapd.centos" "$HTTPD_ROOT/test/"
+
+      - name: Start and seed LDAP servers (upstream's scripts/ldap-init.sh)
         run: |
-          ldapadd -x -D "cn=admin,dc=example,dc=com" -w admin \
-            -H ldap://localhost:8389 -f "$PERL_FRAMEWORK/scripts/httpd.ldif"
+          cd $PERL_FRAMEWORK
+          ./scripts/ldap-init.sh
 
       - name: Run each Perl test individually
         timeout-minutes: 280
