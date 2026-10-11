@@ -236,7 +236,9 @@ jobs:
           cd $HTTPD_ROOT
           MPM=event pytest test/modules/core test/modules/http1 \
             test/modules/http2 test/modules/proxy test/modules/aaa \
-            test/modules/metadata || true
+            test/modules/metadata test/modules/generators \
+            test/modules/dav test/modules/filters test/modules/ssl \
+            test/modules/arch || true
 
       # Perl's build only ever loads the event MPM (--with-mpm=event, never
       # overridden per test) - it structurally cannot cover worker/prefork/
