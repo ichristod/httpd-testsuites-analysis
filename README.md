@@ -280,6 +280,11 @@ from the latest successful `coverage.yml` run, unzip into `coverage/`:
     uv sync
     uv run streamlit run coverage/tools/dashboard.py
 
+Don't want to run streamlit? `print_summary.py` prints the same headline
+numbers and the migration ranking as plain text:
+
+    uv run python3 coverage/tools/print_summary.py
+
 ## Scripts
 
 | Script | Purpose |
@@ -293,6 +298,7 @@ from the latest successful `coverage.yml` run, unzip into `coverage/`:
 | `coverage/tools/analyze_consolidation.py` | Migration priority ranking (gap-scoped) |
 | `coverage/tools/compare_ranking_robustness.py` | Re-runs the ranking 3 ways to sanity-check it |
 | `coverage/tools/dashboard.py` | Streamlit dashboard |
+| `coverage/tools/print_summary.py` | Headline numbers + migration ranking as plain text, no streamlit needed |
 
 Notes worth knowing before changing any of these:
 
