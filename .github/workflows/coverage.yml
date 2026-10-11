@@ -42,7 +42,7 @@ jobs:
       - name: Checkout httpd
         uses: actions/checkout@v4
         with:
-          repository: apache/httpd
+          repository: ichristod/httpd
           ref: ${{ inputs.httpd_ref || 'trunk' }}
           path: httpd
 
