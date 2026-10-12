@@ -100,3 +100,15 @@ while read -r tfile; do
 done < <(find "$PERL_FRAMEWORK/t" -name '*.t' -type f | sort)
 
 echo "done: $total tests, $ok ok, $fail failed"
+
+# so coverage.yml can put these counts in run_info.json without scraping
+# stdout. "ok"/"failed" here is whether gcovr managed to capture this
+# test's coverage, not whether the test itself (TAP) passed - a failing
+# ./t/TEST run still counts as "ok" above as long as gcovr ran afterwards.
+cat > "$outdir/run_summary.json" <<EOF
+{
+  "total": $total,
+  "coverage_ok": $ok,
+  "coverage_failed": $fail
+}
+EOF

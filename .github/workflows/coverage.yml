@@ -238,7 +238,7 @@ jobs:
             test/modules/http2 test/modules/proxy test/modules/aaa \
             test/modules/metadata test/modules/generators \
             test/modules/dav test/modules/filters test/modules/ssl \
-            test/modules/arch || true
+            test/modules/arch 2>&1 | tee $ANALYSIS_ROOT/coverage/python_event.log || true
 
       # Perl's build only ever loads the event MPM (--with-mpm=event, never
       # overridden per test) - it structurally cannot cover worker/prefork/
@@ -256,7 +256,7 @@ jobs:
         continue-on-error: true
         run: |
           cd $HTTPD_ROOT
-          MPM=event pytest test/modules/md/ || true
+          MPM=event pytest test/modules/md/ 2>&1 | tee $ANALYSIS_ROOT/coverage/python_md.log || true
 
       - name: Collect Python coverage
         run: |
@@ -313,6 +313,56 @@ jobs:
             coverage/processed/python.norm.json \
             --json coverage/per_test/perl/consolidation_ranking.json
 
+      # ── Provenance & test health ────────────────────────────────────────────
+      # Nothing inside the artifact itself records which run produced it once
+      # it's unzipped - only the zip filename (coverage-<run_id>.zip) does,
+      # and that's lost after extraction. This also folds in the pass/fail/
+      # skip counts from the three test-execution steps above, which
+      # otherwise only ever existed in the CI log and disappeared once the
+      # run scrolled past.
+      - name: Write run provenance
+        run: |
+          python3 - <<'EOF'
+          import json
+          from datetime import datetime, timezone
+          import re
+
+          def pytest_counts(log_path):
+              try:
+                  text = open(log_path).read()
+              except FileNotFoundError:
+                  return None
+              # last line matching "N passed"/"N failed"/etc is pytest's own
+              # final summary line - grab whichever outcome kinds it reports
+              last_line = None
+              for line in text.splitlines():
+                  if re.search(r"\d+ (passed|failed|skipped|xfailed|xpassed|error)", line):
+                      last_line = line
+              if not last_line:
+                  return None
+              return {kind: int(n) for n, kind in re.findall(
+                  r"(\d+) (passed|failed|skipped|xfailed|xpassed|error)", last_line)}
+
+          try:
+              perl = json.load(open("coverage/per_test/perl/run_summary.json"))
+          except FileNotFoundError:
+              perl = None
+
+          info = {
+              "run_id": "${{ github.run_id }}",
+              "httpd_ref": "${{ inputs.httpd_ref || 'trunk' }}",
+              "mpm": "event",
+              "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "test_health": {
+                  "perl": perl,
+                  "python_event_mpm": pytest_counts("coverage/python_event.log"),
+                  "python_mod_md": pytest_counts("coverage/python_md.log"),
+              },
+          }
+          with open("coverage/run_info.json", "w") as f:
+              json.dump(info, f, indent=2)
+          EOF
+
       # ── Upload ─────────────────────────────────────────────────────────────
       - name: Upload coverage artifacts
         uses: actions/upload-artifact@v4
@@ -323,4 +373,5 @@ jobs:
             coverage/processed/
             coverage/metrics/
             coverage/per_test/
+            coverage/run_info.json
           retention-days: 90

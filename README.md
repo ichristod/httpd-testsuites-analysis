@@ -5,7 +5,30 @@ Perl suite (`httpd-tests`) and the newer Python suite (`pyhttpd`, inside
 `httpd/test/modules`) — to see how much they overlap and which Perl
 tests are worth porting first. Includes a Streamlit dashboard.
 
-## Prerequisites
+## Quick start
+
+Most people want one of these two, not a full local pipeline run.
+
+**See the latest results** — trigger `coverage.yml` from the Actions
+tab (or grab an existing successful run), download its
+`coverage-<run-id>` artifact, unzip into `coverage/`, then:
+
+    uv sync
+    uv run streamlit run coverage/tools/dashboard.py
+
+No streamlit? `uv run python3 coverage/tools/print_summary.py` prints
+the same headline numbers, migration ranking, and per-run test
+pass/fail counts as plain text.
+
+**Run the whole pipeline yourself** — budget a few hours, since the
+Perl suite runs 206 times (once per test file). See "Full local
+pipeline" below for prerequisites and every step, or just read
+`.github/workflows/coverage.yml`, which runs the same steps end to end.
+
+## Full local pipeline
+
+<details>
+<summary>Prerequisites</summary>
 
 - Linux (tested on Fedora 44)
 - gcc with gcov
@@ -50,7 +73,10 @@ Installs this repo's own tools (`gcovr`, `streamlit`, `pandas`, `altair`)
 plus pyhttpd's test dependencies. Prefix commands below with `uv run`,
 or `source .venv/bin/activate` once.
 
-## Setup
+</details>
+
+<details>
+<summary>Setup and build</summary>
 
     git clone https://github.com/apache/httpd.git
     git clone https://github.com/ichristod/httpd-testsuites-analysis.git
@@ -63,7 +89,7 @@ or `source .venv/bin/activate` once.
 
     mkdir -p coverage/{raw,processed,metrics,lcov,per_test}
 
-## Build httpd with coverage
+Build httpd with coverage instrumentation:
 
     rm -rf $PREFIX   # if switching branches, so no stale modules linger
     cd $HTTPD_ROOT
@@ -85,7 +111,10 @@ which crashes gcovr. Remove it once:
 
     rm -f $HTTPD_ROOT/a-conftest.gc*
 
-## Collect Perl suite coverage (per-test)
+</details>
+
+<details>
+<summary>Collect Perl suite coverage (per-test)</summary>
 
 Coverage comes from running each `.t` file individually and unioning
 the results — not one accumulated run — so the overlap comparison and
@@ -109,13 +138,13 @@ httpd's own CI setup for it:
     docker build -t httpd_ldap -f "$HTTPD_ROOT/test/travis_Dockerfile_slapd.centos" "$HTTPD_ROOT/test/"
     cd $PERL_FRAMEWORK && ./scripts/ldap-init.sh
 
-### Expected test failures
-
-These need external services not set up by default — expected, not bugs:
+**Expected test failures** — these need external services not set up
+by default, so seeing exactly these is a working run, not a regression:
 
 - `t/ssl/*` — without redis/memcached, falls back to the default
   (`shmcb`) backend only.
-- `t/modules/ldap.t` — skips without a seeded LDAP server.
+- `t/modules/ldap.t` — skips if you don't run the LDAP seeding steps
+  above (CI always does; a manual local run might skip them).
 - `t/apache/snihostcheck.t`, `t/modules/proxy_websockets_ssl.t` — need
   HTTPS, same as the SSL tests.
 - `t/protocol/echo.t` — needs a backend echo server.
@@ -145,7 +174,10 @@ Clean gcov data before the other suite:
 
     coverage/tools/clean_gcda.sh
 
-## Collect Python suite coverage
+</details>
+
+<details>
+<summary>Collect Python suite coverage</summary>
 
 `--enable-mpms-shared=all` builds every MPM as a loadable module, so
 `pyhttpd` can run under any of them without a rebuild — just set `$MPM`:
@@ -165,12 +197,11 @@ keep both suites on the same MPM.
 Check `git log` on `test/modules/` before assuming the directory list
 above is exhaustive — pyhttpd adds new top-level dirs over time.
 
-### mod_md
-
-`test/modules/md` runs too, same tree, no gcda cleaning in between.
-Genuinely timing-sensitive against a live ACME server, so it runs with
-`continue-on-error` and a tight timeout in CI — a partial failure just
-means partial coverage from that run, not a broken pipeline.
+**mod_md** — `test/modules/md` runs too, same tree, no gcda cleaning in
+between. Genuinely timing-sensitive against a live ACME server, so it
+runs with `continue-on-error` and a tight timeout in CI — a partial
+failure just means partial coverage from that run, not a broken
+pipeline.
 
 Needs `pebble` on `$PATH`:
 
@@ -194,9 +225,8 @@ timeout occasionally fires early, leaving httpd bound to test ports for
 the next file (shows up as "Address already in use" — kill the
 leftover process and rerun that file).
 
-### Collect coverage
-
-One `gcovr` pass covers everything that ran against this `$HTTPD_ROOT`:
+**Collect coverage** — one `gcovr` pass covers everything that ran
+against this `$HTTPD_ROOT`:
 
     gcovr -r $HTTPD_ROOT \
         --gcov-ignore-errors output_error \
@@ -209,7 +239,10 @@ One `gcovr` pass covers everything that ran against this `$HTTPD_ROOT`:
         coverage/raw/python.json \
         coverage/processed/python.norm.json
 
-## Coverage diff
+</details>
+
+<details>
+<summary>Coverage diff and migration ranking</summary>
 
     python coverage/tools/coverage_diff.py \
         coverage/processed/perl.norm.json \
@@ -218,11 +251,9 @@ One `gcovr` pass covers everything that ran against this `$HTTPD_ROOT`:
 
 Swap the two inputs to get Python-only lines instead.
 
-## Migration ranking
-
-Scores Perl tests by how much of the gap (lines Perl covers that Python
-doesn't) each one closes, using the per-test data already collected —
-no second Perl run:
+Migration ranking scores Perl tests by how much of the gap (lines Perl
+covers that Python doesn't) each one closes, using the per-test data
+already collected — no second Perl run:
 
     python coverage/tools/analyze_consolidation.py \
         coverage/per_test/perl/norm \
@@ -235,6 +266,8 @@ re-running it two more ways and comparing:
     python coverage/tools/compare_ranking_robustness.py \
         coverage/per_test/perl/norm \
         coverage/processed/python.norm.json
+
+</details>
 
 ## Dashboard
 
@@ -271,20 +304,6 @@ flowchart TD
     K -.-> L
 ```
 
-## Looking at results without running the pipeline
-
-`coverage/` is gitignored — it's generated output, and a committed
-snapshot would go stale. Instead, grab the `coverage-<run-id>` artifact
-from the latest successful `coverage.yml` run, unzip into `coverage/`:
-
-    uv sync
-    uv run streamlit run coverage/tools/dashboard.py
-
-Don't want to run streamlit? `print_summary.py` prints the same headline
-numbers and the migration ranking as plain text:
-
-    uv run python3 coverage/tools/print_summary.py
-
 ## Scripts
 
 | Script | Purpose |
@@ -297,8 +316,9 @@ numbers and the migration ranking as plain text:
 | `coverage/tools/analyze_per_test.py` | Greedy ranking of Perl tests; `--merged-json` builds `perl.norm.json` |
 | `coverage/tools/analyze_consolidation.py` | Migration priority ranking (gap-scoped) |
 | `coverage/tools/compare_ranking_robustness.py` | Re-runs the ranking 3 ways to sanity-check it |
+| `coverage/tools/config.py` | Shared tunable values (infra threshold, dashboard labels) |
 | `coverage/tools/dashboard.py` | Streamlit dashboard |
-| `coverage/tools/print_summary.py` | Headline numbers + migration ranking as plain text, no streamlit needed |
+| `coverage/tools/print_summary.py` | Headline numbers, test pass/fail counts, and migration ranking as plain text, no streamlit needed |
 
 Notes worth knowing before changing any of these:
 
@@ -307,10 +327,16 @@ Notes worth knowing before changing any of these:
   Not fully audited across all 206 tests.
 - **`analyze_consolidation.py`**: a test showing `new_lines: 0` means
   some other Perl test already claims the same gap lines — not that
-  Python covers it. The 25% "infrastructure" cutoff is a judgment call.
-  `--rank-mode {current,frequency,path}` (default `current`) exists for
-  `compare_ranking_robustness.py` to sanity-check the ranking; the main
-  pipeline always uses `current`.
+  Python covers it. The 25% "infrastructure" cutoff is a judgment call —
+  it lives in `coverage/tools/config.py` (`FREQ_THRESHOLD`), read by
+  `analyze_consolidation.py`, `compare_ranking_robustness.py`,
+  `dashboard.py`, and `presentation/coverage_stats.py`, so changing it
+  only needs editing one file instead of five. It's a pure analysis
+  parameter, not a collection one — changing it doesn't need a CI rerun,
+  just re-running these scripts locally against an already-downloaded
+  artifact. `--rank-mode {current,frequency,path}` (default `current`)
+  exists for `compare_ranking_robustness.py` to sanity-check the
+  ranking; the main pipeline always uses `current`.
 - **`dashboard.py`** computes everything live from the JSON files, no
   caching to disk. The "untested code" breakdown on the Shared
   Infrastructure tab is aggregate-only on purpose — no per-file "least
