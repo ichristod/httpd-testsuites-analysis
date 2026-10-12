@@ -1,0 +1,39 @@
+[project]
+name = "httpd-testsuites-analysis"
+version = "0.1.0"
+description = "Coverage-based analysis comparing httpd's Perl and Python test suites"
+requires-python = ">=3.9"
+dependencies = [
+    # Pinned exactly, matching .github/workflows/coverage.yml - this
+    # project's own methodology notes (CLAUDE.md) document gcovr 7.2
+    # specific behavior (the a-conftest.gcno crash, the .libs/ path
+    # filter bug) that an upgrade could silently change.
+    "gcovr==7.2",
+    # Unpinned here, same posture as CI - uv.lock pins the exact
+    # resolved version for reproducibility, this just sets the floor.
+    "streamlit>=1.50",
+    "pandas>=2.0",
+    # dashboard.py imports this directly (not just through streamlit's
+    # own internals), so it's listed explicitly here even though CI's
+    # pip install line gets it transitively via streamlit - don't rely
+    # on a transitive dependency for something directly imported.
+    "altair>=5.0",
+
+    # Not this repo's own tooling - these run pyhttpd/pytest_suite
+    # (test/modules/* inside the httpd checkout itself, see
+    # HTTPD_ROOT). Same combined-venv approach as coverage.yml:
+    # `pytest test/modules/...` gets run from inside $HTTPD_ROOT, but
+    # relies on whatever venv is currently activated, so it needs to
+    # be this one. Pinned to match coverage.yml's exact version only
+    # where CI pins it (pytest); the rest float like CI's does.
+    "pytest==8.4.2",
+    "cryptography",
+    "pyopenssl",
+    "requests",
+    "python-multipart",
+    "filelock",
+    "websockets",
+]
+
+[tool.uv]
+package = false
