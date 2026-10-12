@@ -12,8 +12,15 @@
 
 import argparse
 import json
+import sys
 from collections import defaultdict
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+from config import FREQ_THRESHOLD, PATH_INFRA_PREFIXES  # noqa: E402
+
+# str.startswith() needs a tuple, config.py has it as a list
+PATH_INFRA_PREFIXES = tuple(PATH_INFRA_PREFIXES)
 
 
 def basename(path):
@@ -96,11 +103,6 @@ def scope_to_gap(per_test, python_cov):
         gap_lines = flatten(cov) - py_flat
         scoped[name] = gap_lines
     return scoped, py_flat
-
-
-# "path" rank-mode treats these as infrastructure, everything else
-# (mostly modules/) as module-specific
-PATH_INFRA_PREFIXES = ("server/", "os/", "include/")
 
 
 # used by compare_ranking_robustness.py to check the ranking isn't just
@@ -210,7 +212,7 @@ def gap_by_file(scoped_tests):
 #
 # a test with high focused overlap = python already tests the same thing.
 # a test with low overlap = good migration candidate.
-def compute_overlap(per_test, python_cov, freq_threshold=0.25):
+def compute_overlap(per_test, python_cov, freq_threshold=FREQ_THRESHOLD):
     py_flat = flatten(python_cov)
     freq = count_line_freq(per_test)
     cutoff = int(len(per_test) * freq_threshold)
@@ -282,8 +284,8 @@ def main():
 
     freq = count_line_freq(per_test)
 
-    # lines hit by >25% of tests are infrastructure
-    cutoff = int(len(per_test) * 0.25)
+    # lines hit by more than freq_threshold of tests are infrastructure
+    cutoff = int(len(per_test) * FREQ_THRESHOLD)
 
     scoped = filter_gap_lines(scoped, args.rank_mode, freq, cutoff)
 

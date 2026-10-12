@@ -15,6 +15,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from analyze_consolidation import (  # noqa: E402
+    FREQ_THRESHOLD,
     count_line_freq,
     filter_gap_lines,
     load_aggregate,
@@ -29,7 +30,7 @@ MODES = ["current", "frequency", "path"]
 def rank_for_mode(per_test, python_cov, mode):
     scoped, _ = scope_to_gap(per_test, python_cov)
     freq = count_line_freq(per_test)
-    cutoff = int(len(per_test) * 0.25)
+    cutoff = int(len(per_test) * FREQ_THRESHOLD)
     scoped = filter_gap_lines(scoped, mode, freq, cutoff)
 
     gap = set()

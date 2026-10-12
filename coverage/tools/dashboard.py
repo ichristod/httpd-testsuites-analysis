@@ -5,12 +5,17 @@
 #
 import json
 import os
+import sys
 
 import altair as alt
 import pandas as pd
 import streamlit as st
 
 COVERAGE_ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+TOOLS_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, TOOLS_DIR)
+from config import FREQ_THRESHOLD, CORE_FILES, UNTESTED_CATEGORIES  # noqa: E402
+CORE_FILES = set(CORE_FILES)
 
 # colors
 C_PYTHON = "#F0C040"
@@ -110,6 +115,58 @@ def per_file_from_raw_and_norm(raw_path, norm):
 
 
 @st.cache_data
+def perl_line_frequency():
+    # how many of the 206 Perl per-test runs hit each (file, line) - this is
+    # the expensive part (loading all per-test files), cached once no matter
+    # what threshold ends up being used. Every test touches a lot of
+    # server-startup boilerplate regardless of what it's actually testing
+    # (--enable-load-all-modules loads everything on every run), so without
+    # filtering this out, a per-module breakdown is just "how big is this
+    # module's startup footprint," not "how well is it tested."
+    norm_dir = os.path.join(COVERAGE_ROOT, "per_test", "perl", "norm")
+    if not os.path.isdir(norm_dir):
+        return None, 0
+    files = [f for f in os.listdir(norm_dir) if f.endswith(".json")]
+    if not files:
+        return None, 0
+    freq = {}
+    for fn in files:
+        with open(os.path.join(norm_dir, fn)) as fh:
+            cov = json.load(fh)
+        for fname, lines in cov.items():
+            for ln in lines:
+                key = (fname, ln)
+                freq[key] = freq.get(key, 0) + 1
+    return freq, len(files)
+
+
+def infra_lines_at(threshold):
+    # cheap - just thresholds the frequency map above, so moving the slider
+    # doesn't re-read 206 files every time.
+    freq, n_tests = perl_line_frequency()
+    if freq is None:
+        return None
+    cutoff = int(n_tests * threshold)
+    return {k for k, v in freq.items() if v > cutoff}
+
+
+@st.cache_data
+def per_file_focused(raw_path, norm, infra_lines):
+    raw = load_json(raw_path)
+    files = {}
+    for f in raw["files"]:
+        fname = f["file"]
+        total = len(f["lines"])
+        covered_lines = set(norm.get(fname, []))
+        if infra_lines:
+            focused = sum(1 for ln in covered_lines if (fname, ln) not in infra_lines)
+        else:
+            focused = len(covered_lines)
+        files[fname] = {"total": total, "covered": focused}
+    return files
+
+
+@st.cache_data
 def load_all():
     py_norm = load_json(os.path.join(COVERAGE_ROOT, "processed", "python.norm.json"))
     perl_norm = load_json(os.path.join(COVERAGE_ROOT, "processed", "perl.norm.json"))
@@ -161,14 +218,6 @@ def load_all():
             "Only in Python": len(py_only.get(fname, [])),
         })
 
-    # per-suite file tables
-    py_file_rows = suite_file_rows(py_raw)
-    perl_file_rows = suite_file_rows(perl_raw)
-
-    # per-module aggregation
-    py_by_module = suite_by_module(py_raw)
-    perl_by_module = suite_by_module(perl_raw)
-
     # overlap table
     overlap_rows = []
     for fname in set(py_norm.keys()) & set(perl_norm.keys()):
@@ -205,12 +254,26 @@ def load_all():
         "perl_files": len(perl_raw),
         "all_files": len(all_files),
         "file_table": pd.DataFrame(file_rows),
-        "py_file_table": pd.DataFrame(py_file_rows),
-        "perl_file_table": pd.DataFrame(perl_file_rows),
-        "py_by_module": py_by_module,
-        "perl_by_module": perl_by_module,
         "gap_table": pd.DataFrame(gap_rows),
         "overlap_table": pd.DataFrame(overlap_rows),
+    }
+
+
+@st.cache_data
+def focused_tables(threshold):
+    # the Focus tabs' per-module/per-file breakdown, recomputed for whatever
+    # threshold the sidebar slider is currently set to - separate from
+    # load_all() so moving the slider doesn't re-run everything else too.
+    py_norm = load_json(os.path.join(COVERAGE_ROOT, "processed", "python.norm.json"))
+    perl_norm = load_json(os.path.join(COVERAGE_ROOT, "processed", "perl.norm.json"))
+    infra_lines = infra_lines_at(threshold)
+    py_focused = per_file_focused(os.path.join(COVERAGE_ROOT, "raw", "python.json"), py_norm, infra_lines)
+    perl_focused = per_file_focused(os.path.join(COVERAGE_ROOT, "raw", "perl.json"), perl_norm, infra_lines)
+    return {
+        "py_file_table": pd.DataFrame(suite_file_rows(py_focused)),
+        "perl_file_table": pd.DataFrame(suite_file_rows(perl_focused)),
+        "py_by_module": suite_by_module(py_focused),
+        "perl_by_module": suite_by_module(perl_focused),
     }
 
 
@@ -247,11 +310,12 @@ def untested_composition():
     def bucket(pred):
         return sum(v for k, v in untested.items() if pred(k))
 
-    platform = bucket(lambda k: "win32" in k or "netware" in k or "os2" in k)
-    tools = bucket(lambda k: k.startswith("support/"))
-    ldap = bucket(lambda k: "ldap" in k.lower())
+    uc = UNTESTED_CATEGORIES
+    platform = bucket(lambda k: any(kw in k for kw in uc["platform_keywords"]))
+    tools = bucket(lambda k: k.startswith(uc["tools_prefix"]))
+    ldap = bucket(lambda k: uc["ldap_keyword"] in k.lower())
     unselected_mpm = bucket(lambda k: any(
-        f"/mpm/{m}/" in k for m in ("motorz", "simple", "prefork", "worker")
+        f"/mpm/{m}/" in k for m in uc["unselected_mpms"]
     ))
     explained = platform + tools + ldap + unselected_mpm
     unexplained = total - explained
@@ -278,6 +342,15 @@ st.set_page_config(page_title="httpd Coverage Comparison", layout="wide")
 st.title("httpd Test Coverage")
 st.caption("Comparing Python and Perl test suites")
 
+run_info_path = os.path.join(COVERAGE_ROOT, "run_info.json")
+if os.path.exists(run_info_path):
+    info = load_json(run_info_path)
+    st.caption(f"Data from GitHub Actions run {info.get('run_id', '?')} "
+               f"(httpd_ref={info.get('httpd_ref', '?')}, generated {info.get('generated_at', '?')})")
+else:
+    st.caption("Data provenance unknown - no run_info.json in this coverage/ "
+               "(older artifact, or a manual local run)")
+
 required = [
     os.path.join(COVERAGE_ROOT, "processed", "perl.norm.json"),
     os.path.join(COVERAGE_ROOT, "processed", "python.norm.json"),
@@ -292,6 +365,20 @@ if missing:
 
 data = load_all()
 untested_data = untested_composition()
+
+with st.sidebar:
+    st.header("Focus tab filter")
+    threshold_pct = st.slider(
+        "Infrastructure threshold (%)", min_value=5, max_value=90,
+        value=int(round(FREQ_THRESHOLD * 100)), step=5,
+        help="Lines hit by more than this share of the 206 Perl per-test runs "
+             "are treated as shared infrastructure and excluded from the "
+             "Perl/Python Focus tabs' per-module and per-file breakdown. "
+             "Only affects those two tabs - the migration ranking on the "
+             "Consolidation tab stays fixed at the repo's default "
+             f"({FREQ_THRESHOLD:.0%}, set in coverage/tools/config.json).")
+live_threshold = threshold_pct / 100
+focus_data = focused_tables(live_threshold)
 
 consolidation_path = os.path.join(COVERAGE_ROOT, "per_test", "perl", "consolidation_ranking.json")
 has_consolidation = os.path.exists(consolidation_path)
@@ -311,12 +398,8 @@ tab_overview, tab_python, tab_perl, tab_shared, tab_consolidation = st.tabs([
 def kpi(label, value, color=None):
     with st.container(border=True):
         st.caption(label)
-        if color:
-            st.markdown(f"<span style='font-size:1.8rem;font-weight:700;color:{color}'>{value}</span>",
-                        unsafe_allow_html=True)
-        else:
-            st.markdown(f"<span style='font-size:1.8rem;font-weight:700'>{value}</span>",
-                        unsafe_allow_html=True)
+        style = "font-size:1.8rem;font-weight:700" + (f";color:{color}" if color else "")
+        st.markdown(f"<span style='{style}'>{value}</span>", unsafe_allow_html=True)
 
 
 def bar_chart(df, x_col, y_col, color, height=350, angle=-45):
@@ -425,18 +508,24 @@ with tab_overview:
 
 # -- suite focus tab (reused for python and perl) --
 
-def render_focus(df_all, by_module, color, name):
+def render_focus(df_all, by_module, color, name, threshold):
     df = df_all.copy()
 
     st.caption(f"Everything {name} covers, including lines the other suite also reaches - "
                f"not just {name}'s exclusive territory. For lines only {name} reaches, "
                f"see the '{name} Only' number above.")
+    st.caption(f"Module and file totals below are focused lines only (shared startup "
+               f"boilerplate stripped out, {threshold:.0%} cutoff - adjust in the "
+               f"sidebar) - they won't add up to the raw 'Lines Covered' KPI above, "
+               f"that's expected.")
 
     if infra_ratio:
         df["_infra"] = df["Source File"].map(lambda f: infra_ratio.get(f, 0))
         excluded = len(df[df["_infra"] > 80])
         df = df[df["_infra"] <= 80].drop(columns=["_infra"])
-        st.caption(f"{len(df)} module-specific files ({excluded} infrastructure files excluded)")
+        st.caption(f"{len(df)} module-specific files ({excluded} infrastructure files "
+                   f"excluded - this list uses the repo's fixed default threshold "
+                   f"({FREQ_THRESHOLD:.0%}), not the sidebar slider)")
 
     df = df.sort_values("Lines Covered", ascending=False)
 
@@ -475,7 +564,7 @@ with tab_python:
         kpi("Files Touched", str(d["py_files"]))
     with c4:
         kpi("Python-Only Lines", f"{d['py_only_lines']:,}", C_PYTHON)
-    render_focus(d["py_file_table"], d["py_by_module"], C_PYTHON, "Python")
+    render_focus(focus_data["py_file_table"], focus_data["py_by_module"], C_PYTHON, "Python", live_threshold)
 
 
 # -- tab 3: perl focus --
@@ -491,7 +580,7 @@ with tab_perl:
         kpi("Files Touched", str(d["perl_files"]))
     with c4:
         kpi("Perl-Only Lines", f"{d['gap_lines']:,}", C_PERL)
-    render_focus(d["perl_file_table"], d["perl_by_module"], C_PERL, "Perl")
+    render_focus(focus_data["perl_file_table"], focus_data["perl_by_module"], C_PERL, "Perl", live_threshold)
 
 
 # -- tab 4: shared infrastructure --
@@ -559,19 +648,13 @@ with tab_shared:
             "not to test rewriting."
         )
 
-    core_files = {
-        "core.c", "event.c", "config.c", "http_filters.c", "protocol.c",
-        "request.c", "http_protocol.c", "util.c", "util_filter.c",
-        "scoreboard.c", "log.c", "vhost.c", "mpm_common.c", "mpm_fdqueue.c",
-    }
-
     df_overlap = d["overlap_table"]
 
     with st.container(border=True):
         st.subheader("Top shared files")
         df_ov20 = df_overlap.head(20).copy()
         df_ov20["Type"] = df_ov20["Source File"].apply(
-            lambda f: "Server core" if f in core_files else "Module (loaded by both)")
+            lambda f: "Server core" if f in CORE_FILES else "Module (loaded by both)")
         chart = alt.Chart(df_ov20).mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3).encode(
             x=alt.X("Source File:N", sort=df_ov20["Source File"].tolist(),
                      axis=alt.Axis(labelAngle=-60, title=None)),
@@ -601,8 +684,9 @@ with tab_shared:
         with st.container(border=True):
             st.subheader("Infrastructure ratio by file")
             st.caption(
-                "What % of each file's covered lines are shared infrastructure "
-                "(hit by >25% of all Perl tests). 100% = pure infrastructure. "
+                f"What % of each file's covered lines are shared infrastructure "
+                f"(hit by more than {FREQ_THRESHOLD:.0%} of all Perl tests). 100% = pure "
+                "infrastructure. "
                 "A file that's shared (appears above) but scores low here - e.g. "
                 "proxy_util.c - isn't overlap by accident: both suites independently "
                 "wrote real tests for it."
