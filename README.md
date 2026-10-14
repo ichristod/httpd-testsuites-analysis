@@ -7,7 +7,7 @@ tests are worth porting first. Includes a Streamlit dashboard.
 
 ## Quick start
 
-Most people want one of these two, not a full local pipeline run.
+Most people want one of these, not a full local pipeline run.
 
 **See the latest results** — trigger `coverage.yml` from the Actions
 tab (or grab an existing successful run), download its
@@ -19,6 +19,16 @@ tab (or grab an existing successful run), download its
 No streamlit? `uv run python3 coverage/tools/print_summary.py` prints
 the same headline numbers, migration ranking, and per-run test
 pass/fail counts as plain text.
+
+Want the migration ranking in a spreadsheet instead, to hand to someone
+who doesn't want to run any of this? `uv run python3
+coverage/tools/export_ranking_csv.py` writes
+`coverage/exports/consolidation_ranking_<date>.csv` — one row per Perl
+test file, same data as the dashboard's Consolidation tab. The date in
+the filename (and a comment line at the top of the file, with the run's
+`run_id` and `httpd_ref`) is the artifact's own `generated_at` —
+`run_info.json` only records the branch (`trunk`), not a specific httpd
+commit, so that's what's stamped, not a fabricated commit date.
 
 **Run the whole pipeline yourself** — budget a few hours, since the
 Perl suite runs 206 times (once per test file). See "Full local
@@ -319,6 +329,7 @@ flowchart TD
 | `coverage/tools/config.py` | Shared tunable values (infra threshold, dashboard labels) |
 | `coverage/tools/dashboard.py` | Streamlit dashboard |
 | `coverage/tools/print_summary.py` | Headline numbers, test pass/fail counts, and migration ranking as plain text, no streamlit needed |
+| `coverage/tools/export_ranking_csv.py` | Migration ranking as a CSV, stamped with the run's date/id, for use outside this repo |
 
 Notes worth knowing before changing any of these:
 

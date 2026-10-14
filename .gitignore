@@ -6,6 +6,7 @@ coverage/processed/
 coverage/metrics/
 coverage/per_test/
 coverage/lcov/
+coverage/exports/
 coverage/run_info.json
 
 __pycache__/
